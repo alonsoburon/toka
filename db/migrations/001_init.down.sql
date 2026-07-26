@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS trg_task_instances_updated_at ON task_instances;
+DROP TRIGGER IF EXISTS trg_task_templates_updated_at ON task_templates;
+DROP TRIGGER IF EXISTS trg_people_updated_at ON people;
+DROP TRIGGER IF EXISTS trg_households_updated_at ON households;
+DROP FUNCTION IF EXISTS set_updated_at();
+DROP TABLE IF EXISTS task_instances;
+DROP TABLE IF EXISTS task_templates;
+DROP TABLE IF EXISTS people;
+DROP TABLE IF EXISTS households;
+DROP TYPE IF EXISTS task_status;

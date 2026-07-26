@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(go run *)",
+      "Bash(go test *)",
+      "Bash(go doc *)",
+      "Bash(go mod tidy)",
+      "Bash(go mod download)",
+      "Bash(gofmt *)",
+      "Bash(make build)",
+      "Bash(make run)",
+      "Bash(make run-seed)",
+      "Bash(make db-up)",
+      "Bash(make db-down)",
+      "Bash(make curl-setup)",
+      "Bash(curl -s http://localhost:3000/*)",
+      "Bash(curl -s -X POST http://localhost:3000/*)",
+      "Bash(sudo -u postgres pg_isready*)",
+      "Bash(sudo -u postgres psql -d toka -c SELECT *)",
+      "Bash(sudo -u postgres psql -d toka -c \\d*)",
+      "Bash(./gradlew assembleDebug*)",
+      "Bash(./gradlew compileDebugKotlin*)"
+    ],
+    "ask": [
+      "Bash(make db-reset)",
+      "Bash(sudo -u postgres dropdb*)",
+      "Bash(sudo -u postgres createdb*)",
+      "Edit(db/migrations/*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in *.go) gofmt -l -w \"$f\";; esac; } 2>/dev/null || true",
+            "statusMessage": "gofmt",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

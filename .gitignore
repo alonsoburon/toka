@@ -1,0 +1,28 @@
+# Binarios
+toka
+
+# Entorno — contiene credenciales de la base
+.env
+.env.local
+
+# Android
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Node (herramientas de agentes)
+.opencode/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
