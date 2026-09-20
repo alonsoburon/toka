@@ -6,3 +6,10 @@ func nullIfEmpty(s string) *string {
 	}
 	return &s
 }
+
+func nullIfEmptyPtr(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
+}

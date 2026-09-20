@@ -1,19 +1,21 @@
 package server
 
 import (
+	"database/sql"
 	"net/http"
 
 	"toka/internal/auth"
 	"toka/internal/handler"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func New(pool *pgxpool.Pool) http.Handler {
-	s := &handler.Server{DB: pool}
-	authMw := auth.Middleware(pool)
+func New(database *sql.DB) http.Handler {
+	s := &handler.Server{DB: database}
+	authMw := auth.Middleware(database)
 
 	mux := http.NewServeMux()
+
+	// Sin auth: sondeo de disponibilidad.
+	mux.HandleFunc("GET /healthz", s.Health)
 
 	mux.HandleFunc("POST /households", s.CreateHousehold)
 	mux.HandleFunc("POST /households/join", s.JoinHousehold)
@@ -21,7 +23,9 @@ func New(pool *pgxpool.Pool) http.Handler {
 	mux.Handle("GET /households/{hid}/people", authMw(http.HandlerFunc(s.ListPeople)))
 	mux.Handle("POST /households/{hid}/people", authMw(http.HandlerFunc(s.CreatePerson)))
 	mux.Handle("PATCH /people/{id}", authMw(http.HandlerFunc(s.UpdatePerson)))
+	mux.Handle("DELETE /people/{id}", authMw(http.HandlerFunc(s.DeletePerson)))
 	mux.Handle("POST /households/{hid}/regenerate-invite", authMw(http.HandlerFunc(s.RegenerateInvite)))
+	mux.Handle("POST /households/{hid}/leave", authMw(http.HandlerFunc(s.LeaveHousehold)))
 
 	mux.Handle("GET /templates", authMw(http.HandlerFunc(s.ListTemplates)))
 	mux.Handle("POST /templates", authMw(http.HandlerFunc(s.CreateTemplate)))
@@ -38,5 +42,7 @@ func New(pool *pgxpool.Pool) http.Handler {
 	mux.Handle("GET /sync", authMw(http.HandlerFunc(s.Pull)))
 	mux.Handle("POST /sync/mutations", authMw(http.HandlerFunc(s.Push)))
 
-	return mux
+	// 10 req/s por IP con ráfaga de 30; cuerpos de hasta 1 MB; 32 peticiones
+	// concurrentes. Holgado para dos teléfonos, incómodo para un script.
+	return newLimits(10, 30, 1<<20, 32).middleware(mux)
 }

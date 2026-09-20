@@ -1,9 +1,14 @@
-# Binarios
-toka
+# Binario compilado (solo el de la raíz; sin la barra también ignoraba com/toka/)
+/toka
 
 # Entorno — contiene credenciales de la base
 .env
 .env.local
+
+# Base de datos SQLite local
+toka.db
+toka.db-shm
+toka.db-wal
 
 # Android
 android/build/
@@ -15,6 +20,8 @@ android/.cxx/
 *.aab
 *.keystore
 *.jks
+# Credenciales de firma de release — nunca al repo
+android/keystore.properties
 
 # Node (herramientas de agentes)
 .opencode/node_modules/

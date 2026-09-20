@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,8 +11,6 @@ import (
 	"toka/internal/auth"
 	"toka/internal/db"
 	"toka/internal/model"
-
-	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) ListPendingTasks(w http.ResponseWriter, r *http.Request) {
@@ -20,14 +19,14 @@ func (s *Server) ListPendingTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	rows, err := tx.Query(r.Context(), `
+	rows, err := tx.QueryContext(r.Context(), `
 		SELECT ti.id, ti.template_id, ti.household_id, ti.status, ti.due_at,
 		       ti.assigned_to_id, ti.completed_by_id, ti.completed_at, ti.notes,
 		       ti.created_at, ti.updated_at, ti.created_by, ti.updated_by,
@@ -36,11 +35,11 @@ func (s *Server) ListPendingTasks(w http.ResponseWriter, r *http.Request) {
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
 		LEFT JOIN people pa ON pa.id = ti.assigned_to_id
-		WHERE ti.household_id = $1 AND ti.status = 'pending'
+		WHERE ti.household_id = ? AND ti.status = 'pending'
 		ORDER BY
-			CASE WHEN ti.due_at < now() THEN 0 ELSE 1 END,
+			CASE WHEN ti.due_at < ? THEN 0 ELSE 1 END,
 			ti.due_at ASC
-	`, hid)
+	`, hid, time.Now().UTC())
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
@@ -82,14 +81,16 @@ func (s *Server) ListTaskHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	rows, err := tx.Query(r.Context(), `
+	rows, err := tx.QueryContext(r.Context(), `
 		SELECT ti.id, ti.template_id, ti.household_id, ti.status, ti.due_at,
 		       ti.assigned_to_id, ti.completed_by_id, ti.completed_at, ti.notes,
 		       ti.created_at, ti.updated_at, ti.created_by, ti.updated_by,
@@ -98,10 +99,10 @@ func (s *Server) ListTaskHistory(w http.ResponseWriter, r *http.Request) {
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
 		LEFT JOIN people pc ON pc.id = ti.completed_by_id
-		WHERE ti.household_id = $1 AND ti.status IN ('done', 'skipped')
-		  AND ti.completed_at > now() - ($2 * INTERVAL '1 day')
+		WHERE ti.household_id = ? AND ti.status IN ('done', 'skipped')
+		  AND ti.completed_at > ?
 		ORDER BY ti.completed_at DESC
-	`, hid, days)
+	`, hid, cutoff)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
@@ -129,13 +130,13 @@ func (s *Server) ListTaskHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(tasks)
 }
 
-func (s *Server) createNextInstance(ctx context.Context, tx pgx.Tx, instanceID, personID int64, now time.Time) (*time.Time, error) {
+func (s *Server) createNextInstance(ctx context.Context, tx *sql.Tx, instanceID, personID int64, now time.Time) (*time.Time, error) {
 	var recurrenceDays *int
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT tt.recurrence_days
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
-		WHERE ti.id = $1
+		WHERE ti.id = ?
 	`, instanceID).Scan(&recurrenceDays)
 	if err != nil || recurrenceDays == nil {
 		return nil, nil
@@ -143,22 +144,27 @@ func (s *Server) createNextInstance(ctx context.Context, tx pgx.Tx, instanceID, 
 
 	var templateID, householdID int64
 	var preferredAssigneeID *int64
-	err = tx.QueryRow(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT ti.template_id, ti.household_id, tt.preferred_assignee_id
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
-		WHERE ti.id = $1
+		WHERE ti.id = ?
 	`, instanceID).Scan(&templateID, &householdID, &preferredAssigneeID)
 	if err != nil {
 		return nil, nil
 	}
 
+	rowVersion, err := db.NextRowVersion(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
 	nextDueAt := now.Add(time.Duration(*recurrenceDays) * 24 * time.Hour)
-	_, err = tx.Exec(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO task_instances (template_id, household_id, status, due_at,
-			assigned_to_id, created_by, updated_by)
-		VALUES ($1, $2, 'pending', $3, $4, $5, $5)
-	`, templateID, householdID, nextDueAt, preferredAssigneeID, personID)
+			assigned_to_id, row_version, created_by, updated_by, generated_from_instance_id)
+		VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+	`, templateID, householdID, nextDueAt, preferredAssigneeID, rowVersion, personID, personID, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,29 +192,37 @@ func (s *Server) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	var req CompleteTaskRequest
 	json.NewDecoder(r.Body).Decode(&req)
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	now := time.Now()
+	now := time.Now().UTC()
 
-	tag, err := tx.Exec(r.Context(), `
+	rowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	tag, err := tx.ExecContext(r.Context(), `
 		UPDATE task_instances
 		SET status = 'done',
-		    completed_at = $1,
-		    completed_by_id = $2,
-		    notes = COALESCE($3, notes),
-		    updated_by = $2
-		WHERE id = $4 AND household_id = $5 AND status = 'pending'
-	`, &now, person.ID, req.Notes, id, hid)
+		    completed_at = ?,
+		    completed_by_id = ?,
+		    notes = COALESCE(?, notes),
+		    updated_by = ?,
+		    updated_at = ?,
+		    row_version = ?
+		WHERE id = ? AND household_id = ? AND status = 'pending'
+	`, now, person.ID, req.Notes, person.ID, now, rowVersion, id, hid)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if n, _ := tag.RowsAffected(); n == 0 {
 		http.Error(w, `{"error":"task not found or already completed/skipped"}`, http.StatusNotFound)
 		return
 	}
@@ -219,7 +233,7 @@ func (s *Server) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -246,28 +260,36 @@ func (s *Server) SkipTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	now := time.Now()
+	now := time.Now().UTC()
 
-	tag, err := tx.Exec(r.Context(), `
+	rowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	tag, err := tx.ExecContext(r.Context(), `
 		UPDATE task_instances
 		SET status = 'skipped',
-		    completed_at = $1,
-		    completed_by_id = $2,
-		    updated_by = $2
-		WHERE id = $3 AND household_id = $4 AND status = 'pending'
-	`, &now, person.ID, id, hid)
+		    completed_at = ?,
+		    completed_by_id = ?,
+		    updated_by = ?,
+		    updated_at = ?,
+		    row_version = ?
+		WHERE id = ? AND household_id = ? AND status = 'pending'
+	`, now, person.ID, person.ID, now, rowVersion, id, hid)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if n, _ := tag.RowsAffected(); n == 0 {
 		http.Error(w, `{"error":"task not found or already completed/skipped"}`, http.StatusNotFound)
 		return
 	}
@@ -278,7 +300,7 @@ func (s *Server) SkipTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -327,34 +349,46 @@ func (s *Server) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		parsed = parsed.UTC()
 		dueAt = &parsed
 	}
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	tag, err := tx.Exec(r.Context(), `
-		UPDATE task_instances
-		SET assigned_to_id = COALESCE($1, assigned_to_id),
-		    notes = COALESCE($2, notes),
-		    due_at = COALESCE($3, due_at),
-		    updated_by = $4
-		WHERE id = $5 AND household_id = $6
-	`, req.AssignedToID, req.Notes, dueAt, editor.ID, id, hid)
+	rowVersion, err := db.NextRowVersion(r.Context(), tx)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	if tag.RowsAffected() == 0 {
+
+	tag, err := tx.ExecContext(r.Context(), `
+		UPDATE task_instances
+		-- COALESCE igual que la cola de sync ("task.update"): un campo ausente no
+		-- borra el valor existente, y las dos rutas de escritura se comportan igual.
+		SET assigned_to_id = COALESCE(?, assigned_to_id),
+		    notes = COALESCE(?, notes),
+		    due_at = COALESCE(?, due_at),
+		    updated_by = ?,
+		    updated_at = ?,
+		    row_version = ?
+		WHERE id = ? AND household_id = ?
+	`, req.AssignedToID, req.Notes, dueAt, editor.ID, time.Now().UTC(),
+		rowVersion, id, hid)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if n, _ := tag.RowsAffected(); n == 0 {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}

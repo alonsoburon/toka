@@ -42,6 +42,7 @@ type TaskTemplate struct {
 	Description         *string   `json:"description"`
 	RecurrenceDays      *int      `json:"recurrence_days"`
 	PreferredAssigneeID *int64    `json:"preferred_assignee_id"`
+	ReminderTimes       *string   `json:"reminder_times"`
 	IsActive            bool      `json:"is_active"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`

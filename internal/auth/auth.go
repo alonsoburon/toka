@@ -2,12 +2,9 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
-
-	"toka/internal/db"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type ctxKey string
@@ -28,12 +25,10 @@ type Person struct {
 // Middleware resuelve el bearer token a una persona y deja en el contexto tanto la
 // persona como su household.
 //
-// La resolución va en su propia transacción corta, con app.token_hash fijado, para
-// que la policy people_token_lookup deje pasar exactamente esa fila. El handler
-// abrirá después su propia transacción declarando el household — dos viajes a la
-// base por petición, a cambio de que el aislamiento lo garantice el motor y no la
-// disciplina de quien escribe el SQL.
-func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+// La resolución es una lectura simple por token_hash, que es único a nivel global.
+// El handler abre después su propia transacción y filtra por household_id en cada
+// consulta — ya no hay RLS que lo haga por el código.
+func Middleware(database *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -49,17 +44,10 @@ func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 
 			hash := HashToken(token)
 
-			tx, err := db.BeginWithTokenHash(r.Context(), pool, hash)
-			if err != nil {
-				http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
-				return
-			}
-			defer tx.Rollback(r.Context()) // solo lectura: no hay nada que confirmar
-
 			var p Person
-			err = tx.QueryRow(r.Context(), `
+			err := database.QueryRowContext(r.Context(), `
 				SELECT id, household_id, name, color, avatar_emoji
-				FROM people WHERE token_hash = $1
+				FROM people WHERE token_hash = ?
 			`, hash).Scan(&p.ID, &p.HouseholdID, &p.Name, &p.Color, &p.AvatarEmoji)
 			if err != nil {
 				unauthorized(w)

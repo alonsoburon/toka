@@ -3,7 +3,8 @@
 Tareas domésticas compartidas. Una casa, varias personas, plantillas de tarea que se
 regeneran solas cuando alguien las completa.
 
-Backend en Go con PostgreSQL, cliente Android en Compose que funciona sin conexión.
+Backend en Go con SQLite (un solo archivo, sin daemon), cliente Android en Compose que
+funciona sin conexión.
 
 ## Cómo funciona
 
@@ -17,15 +18,15 @@ tarea a un día de distancia. La recurrencia no castiga.
 
 ## Puesta en marcha
 
-Requiere Go 1.26 y PostgreSQL 18.
+Requiere Go 1.26. No hace falta instalar ningún motor de base de datos: SQLite vive en
+un solo archivo (`toka.db`).
 
 ```bash
-make db-up                              # arranca PostgreSQL
-make db-roles                           # crea los roles toka_app / toka_readonly
-TOKA_APP_PASSWORD=... make db-password  # su contraseña
-cp .env.example .env                    # y ajusta las URLs
-make run-seed                           # migra, siembra y sirve en :3000
+make run-seed   # migra, siembra y sirve en :3000 (crea .env si falta)
 ```
+
+La base se migra sola al arrancar, leyendo `db/migrations/` del disco, así que el
+servidor se ejecuta desde la raíz del repo.
 
 Datos de prueba listos para usar tras el seed:
 
@@ -44,18 +45,41 @@ cd android && ./gradlew assembleDebug
 La URL del backend está en `buildConfigField("String", "BASE_URL", ...)` dentro de
 `android/app/build.gradle.kts`.
 
+## Releases e instalación con Obtainium
+
+Cada tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que compila un APK firmado y
+lo publica como GitHub Release. [Obtainium](https://github.com/ImranR98/Obtainium) lee
+esos releases y actualiza la app sola.
+
+1. Instala Obtainium.
+2. "Add App" → pega `https://github.com/alonsoburon/toka`.
+3. Obtainium detecta los releases y el asset `.apk` sin configuración extra.
+
+Para publicar una versión:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+El workflow deriva `versionName` del tag y `versionCode = major*10000 + minor*100 + patch`,
+así que un tag más alto siempre instala por encima del anterior. La firma usa el keystore
+guardado en los secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD`.
+
+**Guardá `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
+Son la única forma de firmar actualizaciones que Android acepte como del mismo
+desarrollador; si se pierden, hay que desinstalar y reinstalar. El APK de release y el de
+debug tienen firmas distintas: para pasar de uno a otro hay que desinstalar.
+
 ## Decisiones que vale la pena conocer
 
-**El aislamiento entre casas lo aplica Postgres, no el código.** Cada tabla tiene
-Row-Level Security y el servidor declara en qué household trabaja al abrir la
-transacción. Una consulta a la que se le olvide el `WHERE household_id` devuelve cero
-filas en vez de las de otra familia. `make db-check-rls` lo comprueba.
+**El aislamiento entre casas lo aplica el código Go.** SQLite no trae Row-Level
+Security, así que cada query autenticada filtra por `household_id`; olvidarlo es una
+fuga entre familias. Es la frontera que antes garantizaba RLS en Postgres.
 
-**El servidor entra a la base con un rol sin privilegios.** `toka_app` no tiene DDL ni
-`BYPASSRLS`; el dueño de las tablas solo se usa para migrar. Contra un host remoto sin
-TLS, el servidor se niega a arrancar en vez de mandar las credenciales en claro.
-
-**Los bearer tokens se guardan hasheados.** Un dump de la base no entrega sesiones.
+**Los bearer tokens se guardan hasheados** (`people.token_hash`, sha256). Un dump de la
+base no entrega sesiones.
 
 **El cliente Android es local-first.** La UI lee de SQLite y nunca espera a la red. Las
 escrituras se aplican al instante y se encolan; al recuperar señal suben con un id de
@@ -74,9 +98,8 @@ que trabajan en este repositorio.
 ## Estado
 
 Funciona y está verificado de punta a punta con `.claude/scripts/smoke.sh` y
-`.claude/scripts/smoke-sync.sh`, que ejercitan la API real contra Postgres. No hay
-tests unitarios en Go todavía.
+`.claude/scripts/smoke-sync.sh`, que ejercitan la API real contra SQLite. No hay tests
+unitarios en Go todavía.
 
-Pendiente conocido: las pantallas de Compose siguen leyendo por las funciones puntuales
-del repositorio en vez de por los `Flow` que ya exponen, así que el modo offline
-funciona pero la UI todavía no se redibuja sola al entrar un sync.
+El Dashboard, Historial y Personas ya leen de los `Flow` de Room, así que se redibujan
+solos cuando entra un sync. Quedan por migrar algunas lecturas puntuales.

@@ -1,112 +1,72 @@
 -- 001_init.up.sql
+--
+-- Esquema base de Toka sobre SQLite.
+--
+-- SQLite no tiene tipos nativos de fecha ni booleanos. Las fechas se declaran
+-- TIMESTAMP (afinidad NUMERIC, pero guardan el texto tal cual) para que el driver
+-- las entregue como time.Time; el formato es ISO-8601 UTC de ancho fijo, que ordena
+-- lexicográficamente. Los booleanos son INTEGER 0/1.
 
-CREATE TYPE task_status AS ENUM ('pending', 'done', 'skipped');
+-- `households` y `people` se referencian mutuamente. SQLite resuelve las FKs de
+-- forma diferida: la tabla puede referenciar a otra que todavía no existe, y con
+-- DEFERRABLE INITIALLY DEFERRED la fila se valida recién al COMMIT. Eso permite
+-- crear el household y su admin en la misma transacción.
 
 CREATE TABLE households (
-    id           BIGSERIAL PRIMARY KEY,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
     name         TEXT NOT NULL,
     invite_code  TEXT UNIQUE NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by   BIGINT NOT NULL,
-    updated_by   BIGINT NOT NULL
+    created_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    updated_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    created_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED,
+    updated_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE people (
-    id           BIGSERIAL PRIMARY KEY,
-    household_id BIGINT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     color        TEXT NOT NULL DEFAULT '#a78bfa',
     avatar_emoji TEXT NOT NULL DEFAULT '🐣',
-    token        TEXT UNIQUE NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by   BIGINT NOT NULL,
-    updated_by   BIGINT NOT NULL
+    token_hash   TEXT UNIQUE NOT NULL,
+    created_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    updated_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    created_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED,
+    updated_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE task_templates (
-    id                    BIGSERIAL PRIMARY KEY,
-    household_id          BIGINT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id          INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     name                  TEXT NOT NULL,
     description           TEXT,
-    recurrence_days       INT,
-    preferred_assignee_id BIGINT REFERENCES people(id),
+    recurrence_days       INTEGER,
+    preferred_assignee_id INTEGER REFERENCES people(id),
     is_active             BOOLEAN NOT NULL DEFAULT true,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by            BIGINT NOT NULL,
-    updated_by            BIGINT NOT NULL
+    created_at            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    updated_at            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    created_by            INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED,
+    updated_by            INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE task_instances (
-    id              BIGSERIAL PRIMARY KEY,
-    template_id     BIGINT NOT NULL REFERENCES task_templates(id) ON DELETE CASCADE,
-    household_id    BIGINT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-    status          task_status NOT NULL DEFAULT 'pending',
-    due_at          TIMESTAMPTZ NOT NULL,
-    assigned_to_id  BIGINT REFERENCES people(id),
-    completed_by_id BIGINT REFERENCES people(id),
-    completed_at    TIMESTAMPTZ,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     INTEGER NOT NULL REFERENCES task_templates(id) ON DELETE CASCADE,
+    household_id    INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'skipped')),
+    due_at          TIMESTAMP NOT NULL,
+    assigned_to_id  INTEGER REFERENCES people(id),
+    completed_by_id INTEGER REFERENCES people(id),
+    completed_at    TIMESTAMP,
     notes           TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by      BIGINT NOT NULL,
-    updated_by      BIGINT NOT NULL
+    created_at      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    updated_at      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
+    created_by      INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED,
+    updated_by      INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED
 );
 
--- Function + triggers: auto-set updated_at on every UPDATE for every table
-CREATE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_households_updated_at
-    BEFORE UPDATE ON households
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-CREATE TRIGGER trg_people_updated_at
-    BEFORE UPDATE ON people
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-CREATE TRIGGER trg_task_templates_updated_at
-    BEFORE UPDATE ON task_templates
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-CREATE TRIGGER trg_task_instances_updated_at
-    BEFORE UPDATE ON task_instances
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- Indexes
-CREATE INDEX idx_people_household ON people(household_id);
-CREATE INDEX idx_people_token ON people(token);
-CREATE INDEX idx_templates_household ON task_templates(household_id) WHERE is_active = true;
+CREATE INDEX idx_people_household           ON people(household_id);
+CREATE INDEX idx_templates_household        ON task_templates(household_id) WHERE is_active = true;
 CREATE INDEX idx_instances_household_status ON task_instances(household_id, status);
-CREATE INDEX idx_instances_template ON task_instances(template_id);
-CREATE INDEX idx_instances_due_at ON task_instances(household_id, due_at) WHERE status = 'pending';
-
--- FK for households.created_by (needs deferrable because people don't exist yet)
-ALTER TABLE households ADD CONSTRAINT fk_households_created_by
-    FOREIGN KEY (created_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE households ADD CONSTRAINT fk_households_updated_by
-    FOREIGN KEY (updated_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-
--- FK for people.created_by (self-referential: first person must reference itself)
-ALTER TABLE people ADD CONSTRAINT fk_people_created_by
-    FOREIGN KEY (created_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE people ADD CONSTRAINT fk_people_updated_by
-    FOREIGN KEY (updated_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-
--- FK for task_templates.created_by/updated_by (created by an existing person)
-ALTER TABLE task_templates ADD CONSTRAINT fk_templates_created_by
-    FOREIGN KEY (created_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE task_templates ADD CONSTRAINT fk_templates_updated_by
-    FOREIGN KEY (updated_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-
--- FK for task_instances.created_by/updated_by (created by an existing person)
-ALTER TABLE task_instances ADD CONSTRAINT fk_instances_created_by
-    FOREIGN KEY (created_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE task_instances ADD CONSTRAINT fk_instances_updated_by
-    FOREIGN KEY (updated_by) REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX idx_instances_template         ON task_instances(template_id);
+CREATE INDEX idx_instances_due_at           ON task_instances(household_id, due_at) WHERE status = 'pending';

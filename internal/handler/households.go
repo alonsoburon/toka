@@ -1,17 +1,18 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
 	"toka/internal/auth"
 	"toka/internal/db"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Server struct {
-	DB *pgxpool.Pool
+	DB *sql.DB
 }
 
 type CreateHouseholdRequest struct {
@@ -31,11 +32,9 @@ type CreateHouseholdResponse struct {
 
 // CreateHousehold es el único punto del sistema que crea un household desde cero.
 //
-// El orden importa: primero se reserva el id con nextval y se declara el household
-// activo, y recién entonces se inserta. Al revés no funcionaría — la policy
-// households_scope exige que la fila que se inserta pertenezca al household activo,
-// y el id no existe hasta después del INSERT. Reservarlo antes evita tener que
-// abrir una policy de excepción que permita escribir sin contexto.
+// El household y su admin se crean en la misma transacción. Las FKs cread_by/
+// updated_by apuntan a people y son DEFERRABLE INITIALLY DEFERRED, así que se
+// pueden insertar en 0 y corregirlas antes del COMMIT.
 func (s *Server) CreateHousehold(w http.ResponseWriter, r *http.Request) {
 	var req CreateHouseholdRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -61,62 +60,57 @@ func (s *Server) CreateHousehold(w http.ResponseWriter, r *http.Request) {
 	inviteCode := auth.NewInviteCode()
 	personToken := auth.NewToken()
 
-	tx, err := s.DB.Begin(r.Context())
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	householdID, err := db.NextHouseholdID(r.Context(), tx)
-	if err != nil {
-		http.Error(w, `{"error":"could not allocate household"}`, http.StatusInternalServerError)
-		return
-	}
-	if err := db.SetHousehold(r.Context(), tx, householdID); err != nil {
-		http.Error(w, `{"error":"could not scope transaction"}`, http.StatusInternalServerError)
-		return
-	}
-
-	_, err = tx.Exec(r.Context(), `
-		INSERT INTO households (id, name, invite_code, created_by, updated_by)
-		VALUES ($1, $2, $3, 0, 0)
-	`, householdID, req.Name, inviteCode)
+	var householdID int64
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO households (name, invite_code, created_by, updated_by)
+		VALUES (?, ?, 0, 0) RETURNING id
+	`, req.Name, inviteCode).Scan(&householdID)
 	if err != nil {
 		http.Error(w, `{"error":"could not create household"}`, http.StatusInternalServerError)
 		return
 	}
 
+	personRowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
 	var personID int64
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO people (household_id, name, color, avatar_emoji, token_hash, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, 0, 0) RETURNING id
-	`, householdID, req.AdminName, req.AdminColor, req.AdminEmoji, auth.HashToken(personToken)).Scan(&personID)
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO people (household_id, name, color, avatar_emoji, token_hash,
+			row_version, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 0) RETURNING id
+	`, householdID, req.AdminName, req.AdminColor, req.AdminEmoji,
+		auth.HashToken(personToken), personRowVersion).Scan(&personID)
 	if err != nil {
 		http.Error(w, `{"error":"could not create admin"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// created_by/updated_by quedaron en 0 porque la persona no existía todavía.
-	// Las FKs son DEFERRABLE INITIALLY DEFERRED: se validan al COMMIT, así que hay
-	// margen para corregirlas aquí.
-	_, err = tx.Exec(r.Context(), `
-		UPDATE households SET created_by = $1, updated_by = $1 WHERE id = $2
-	`, personID, householdID)
-	if err != nil {
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE households SET created_by = ?, updated_by = ?, updated_at = ? WHERE id = ?
+	`, personID, personID, now, householdID); err != nil {
 		http.Error(w, `{"error":"could not update household refs"}`, http.StatusInternalServerError)
 		return
 	}
 
-	_, err = tx.Exec(r.Context(), `
-		UPDATE people SET created_by = $1, updated_by = $1 WHERE id = $1
-	`, personID)
-	if err != nil {
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE people SET created_by = ?, updated_by = ? WHERE id = ?
+	`, personID, personID, personID); err != nil {
 		http.Error(w, `{"error":"could not update person refs"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -142,11 +136,6 @@ type JoinHouseholdRequest struct {
 }
 
 // JoinHousehold entra con un invite code y sin token.
-//
-// Empieza con app.invite_code fijado, que por households_invite_lookup deja ver
-// exactamente el household de ese código y ninguno más — no sirve para enumerar.
-// En cuanto se conoce el household, la transacción lo adopta y el resto de las
-// escrituras van bajo las policies normales.
 func (s *Server) JoinHousehold(w http.ResponseWriter, r *http.Request) {
 	var req JoinHouseholdRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -167,52 +156,48 @@ func (s *Server) JoinHousehold(w http.ResponseWriter, r *http.Request) {
 
 	personToken := auth.NewToken()
 
-	tx, err := db.BeginWithInviteCode(r.Context(), s.DB, req.InviteCode)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	// Sin FOR UPDATE. Bloquear una fila cuenta como intención de escribirla, así que
-	// Postgres la evalúa contra la policy de UPDATE y no contra la de SELECT — y la
-	// de invite code es solo de lectura, de modo que el lock devolvía cero filas.
-	// Tampoco hacía falta: aquí no se lee-modifica-escribe el household, solo se
-	// inserta una persona. Lo peor que puede pasar en una carrera es entrar con un
-	// código que acaba de rotarse, que es inofensivo.
 	var householdID int64
-	err = tx.QueryRow(r.Context(), `
-		SELECT id FROM households WHERE invite_code = $1
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT id FROM households WHERE invite_code = ?
 	`, req.InviteCode).Scan(&householdID)
 	if err != nil {
 		http.Error(w, `{"error":"invalid invite code"}`, http.StatusNotFound)
 		return
 	}
 
-	if err := db.SetHousehold(r.Context(), tx, householdID); err != nil {
-		http.Error(w, `{"error":"could not scope transaction"}`, http.StatusInternalServerError)
+	personRowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	var personID int64
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO people (household_id, name, color, avatar_emoji, token_hash, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, 0, 0) RETURNING id
-	`, householdID, req.Name, req.Color, req.Emoji, auth.HashToken(personToken)).Scan(&personID)
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO people (household_id, name, color, avatar_emoji, token_hash,
+			row_version, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 0) RETURNING id
+	`, householdID, req.Name, req.Color, req.Emoji,
+		auth.HashToken(personToken), personRowVersion).Scan(&personID)
 	if err != nil {
 		http.Error(w, `{"error":"could not create person"}`, http.StatusInternalServerError)
 		return
 	}
 
-	_, err = tx.Exec(r.Context(), `
-		UPDATE people SET created_by = $1, updated_by = $1 WHERE id = $1
-	`, personID)
-	if err != nil {
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE people SET created_by = ?, updated_by = ? WHERE id = ?
+	`, personID, personID, personID); err != nil {
 		http.Error(w, `{"error":"could not update refs"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -227,6 +212,112 @@ func (s *Server) JoinHousehold(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// LeaveHousehold borra a la persona autenticada de su household.
+//
+// Es distinto de cerrar sesión: el token deja de existir y las tareas que tuviera
+// asignadas quedan libres. La autoría (created_by/updated_by) se reapunta a otra
+// persona del hogar para no violar las FKs. Se niega si es la última persona, porque
+// dejaría el household huérfano.
+func (s *Server) LeaveHousehold(w http.ResponseWriter, r *http.Request) {
+	person, hid, ok := auth.RequireAuth(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := s.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var survivor int64
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT id FROM people WHERE household_id = ? AND id != ? ORDER BY id LIMIT 1
+	`, hid, person.ID).Scan(&survivor)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, `{"error":"no puedes salir siendo la última persona del hogar"}`, http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	now := time.Now().UTC()
+	rowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Lo que dependía del que se va queda libre o reapuntado a quien se queda.
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE task_instances SET assigned_to_id = NULL, updated_by = ?, updated_at = ?, row_version = ?
+		WHERE household_id = ? AND assigned_to_id = ?
+	`, survivor, now, rowVersion, hid, person.ID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE task_instances SET completed_by_id = NULL, updated_by = ?, updated_at = ?, row_version = ?
+		WHERE household_id = ? AND completed_by_id = ?
+	`, survivor, now, rowVersion, hid, person.ID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE task_templates SET preferred_assignee_id = NULL, updated_by = ?, updated_at = ?, row_version = ?
+		WHERE household_id = ? AND preferred_assignee_id = ?
+	`, survivor, now, rowVersion, hid, person.ID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	for _, q := range []string{
+		`UPDATE task_instances SET created_by = ? WHERE created_by = ?`,
+		`UPDATE task_instances SET updated_by = ? WHERE updated_by = ?`,
+		`UPDATE task_templates SET created_by = ? WHERE created_by = ?`,
+		`UPDATE task_templates SET updated_by = ? WHERE updated_by = ?`,
+		`UPDATE people SET created_by = ? WHERE created_by = ?`,
+		`UPDATE people SET updated_by = ? WHERE updated_by = ?`,
+		`UPDATE households SET created_by = ? WHERE created_by = ?`,
+		`UPDATE households SET updated_by = ? WHERE updated_by = ?`,
+		`UPDATE sync_mutations SET person_id = ? WHERE person_id = ?`,
+	} {
+		if _, err := tx.ExecContext(r.Context(), q, survivor, person.ID); err != nil {
+			http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO sync_tombstones (household_id, entity, entity_id, row_version)
+		VALUES (?, 'person', ?, ?)
+		ON CONFLICT (household_id, entity, entity_id)
+		DO UPDATE SET row_version = excluded.row_version,
+		              deleted_at = strftime('%Y-%m-%d %H:%M:%f+00:00','now')
+	`, hid, person.ID, rowVersion); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		DELETE FROM people WHERE id = ? AND household_id = ?
+	`, person.ID, hid); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "left"})
+}
+
 func (s *Server) RegenerateInvite(w http.ResponseWriter, r *http.Request) {
 	_, hid, ok := auth.RequireAuth(w, r)
 	if !ok {
@@ -235,25 +326,21 @@ func (s *Server) RegenerateInvite(w http.ResponseWriter, r *http.Request) {
 
 	inviteCode := auth.NewInviteCode()
 
-	tx, err := db.BeginScoped(r.Context(), s.DB, hid)
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
-	// El "WHERE id = $2" es redundante bajo RLS (la policy ya acota al household
-	// activo), pero se mantiene: si algún día el servidor corriera con un rol que
-	// se salta RLS, esta sentencia seguiría siendo correcta por sí sola.
-	_, err = tx.Exec(r.Context(), `
-		UPDATE households SET invite_code = $1 WHERE id = $2
-	`, inviteCode, hid)
-	if err != nil {
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE households SET invite_code = ?, updated_at = ? WHERE id = ?
+	`, inviteCode, time.Now().UTC(), hid); err != nil {
 		http.Error(w, `{"error":"could not regenerate invite"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +7,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Firma de release. En CI las credenciales llegan por variables de entorno; en local
+// se pueden dejar en android/keystore.properties (gitignoreado). Sin credenciales el
+// APK de release sale sin firmar, que es útil para `assembleRelease` en desarrollo.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun secret(key: String): String? = keystoreProperties.getProperty(key) ?: System.getenv(key)
+
+// rootProject.file resuelve rutas relativas a android/ y deja pasar las absolutas
+// (el CI apunta al keystore decodificado en /tmp).
+val releaseStoreFile = secret("TOKA_KEYSTORE")?.let { rootProject.file(it) }
+val hasReleaseSigning = releaseStoreFile?.exists() == true
 
 android {
     namespace = "com.toka.app"
@@ -14,16 +30,36 @@ android {
         applicationId = "com.toka.app"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+
+        // El workflow de release pasa -PtokaVersionName / -PtokaVersionCode derivados
+        // del tag (v1.2.3 -> 1.2.3 / 10203). En local queda el fallback.
+        versionCode = (project.findProperty("tokaVersionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("tokaVersionName") as String?) ?: "0.1.0-dev"
 
         buildConfigField("String", "BASE_URL", "\"http://192.168.100.8:3000/\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = secret("TOKA_KEYSTORE_PASSWORD")
+                keyAlias = secret("TOKA_KEY_ALIAS")
+                keyPassword = secret("TOKA_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

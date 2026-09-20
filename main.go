@@ -28,44 +28,29 @@ func main() {
 
 	ctx := context.Background()
 
-	// Dos conexiones con roles distintos.
-	//
-	// El migrador necesita ser dueño de las tablas (DDL) y se salta RLS, así que se
-	// usa lo mínimo posible: migrar, sembrar, cerrar. El pool con el que se sirven
-	// las peticiones entra como toka_app, sin DDL y sujeto a las policies.
-	//
-	// En desarrollo local ambas URLs suelen ser la misma y esto no cambia nada.
-	migrator, err := db.ConnectMigrator(ctx)
+	database, err := db.Connect(ctx)
 	if err != nil {
-		log.Fatalf("db (migrador): %v", err)
+		log.Fatalf("db: %v", err)
 	}
+	defer database.Close()
 
 	fmt.Println("Running migrations...")
-	if err := db.Migrate(migrator); err != nil {
-		migrator.Close()
+	if err := db.Migrate(database); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
 	if *seed {
 		fmt.Println("Seeding database...")
-		if err := db.Seed(migrator); err != nil {
-			migrator.Close()
+		if err := db.Seed(database); err != nil {
 			log.Fatalf("seed: %v", err)
 		}
 	}
-	migrator.Close()
 
 	if *migrateOnly {
 		return
 	}
 
-	pool, err := db.Connect(ctx)
-	if err != nil {
-		log.Fatalf("db: %v", err)
-	}
-	defer pool.Close()
-
-	fmt.Println(db.Describe(ctx, pool))
+	fmt.Println(db.Describe())
 
 	listenPort := os.Getenv("PORT")
 	if *port != "" {
@@ -75,7 +60,7 @@ func main() {
 		listenPort = "3000"
 	}
 
-	handler := server.New(pool)
+	handler := server.New(database)
 	addr := ":" + listenPort
 	fmt.Printf("Toka running on http://localhost%s\n", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {
