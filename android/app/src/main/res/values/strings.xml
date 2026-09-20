@@ -177,6 +177,8 @@
     <string name="onboarding_token_label">Token de acceso</string>
     <string name="onboarding_token_hint">El token que te dio el servidor (por ejemplo, el del seed).</string>
     <string name="onboarding_token_enter">Entrar con token</string>
+    <string name="onboarding_server_label">Servidor</string>
+    <string name="onboarding_server_hint">URL del backend, p. ej. http://192.168.100.8:3000</string>
     <string name="onboarding_household_name">Nombre del hogar</string>
     <string name="onboarding_household_placeholder">Casa de los Gómez</string>
     <string name="onboarding_code_label">Código</string>

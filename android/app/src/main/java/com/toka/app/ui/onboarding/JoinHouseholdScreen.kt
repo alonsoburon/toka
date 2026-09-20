@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.toka.app.BuildConfig
 import com.toka.app.R
 import com.toka.app.data.api.decodeMagicInvite
 import com.toka.app.data.di.AppContainer
@@ -81,11 +82,16 @@ fun JoinHouseholdScreen(
 ) {
     val state by viewModel.createState.collectAsStateWithLifecycle()
 
+    val storedServer by AppContainer.instance.tokenStore.serverUrl
+        .collectAsStateWithLifecycle(initialValue = null)
+
     var mode by remember { mutableStateOf(EntryMode.Join) }
     var code by remember { mutableStateOf("") }
     var householdName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
+    // Para Token/Crear hace falta saber a qué servidor apuntar; Unirse lo trae en el código.
+    var server by remember(storedServer) { mutableStateOf(storedServer ?: BuildConfig.BASE_URL) }
     var selectedColor by remember { mutableIntStateOf(0) }
     var selectedEmoji by remember { mutableStateOf("🐱") }
 
@@ -183,6 +189,19 @@ fun JoinHouseholdScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (mode != EntryMode.Join) {
+                OutlinedTextField(
+                    value = server,
+                    onValueChange = { server = it },
+                    label = { Text(stringResource(R.string.onboarding_server_label)) },
+                    supportingText = { Text(stringResource(R.string.onboarding_server_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state !is OnboardingUiState.Loading
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
             when (mode) {
                 EntryMode.Create -> OutlinedTextField(
@@ -338,14 +357,26 @@ fun JoinHouseholdScreen(
             Button(
                 onClick = {
                     when (mode) {
-                        EntryMode.Token -> viewModel.loginWithToken(token)
+                        EntryMode.Token -> scope.launch {
+                            val target = server.trim()
+                            withContext(Dispatchers.IO) {
+                                if (target.isNotBlank()) AppContainer.instance.reconnect(target)
+                            }
+                            viewModel.loginWithToken(token)
+                        }
 
-                        EntryMode.Create -> viewModel.createHousehold(
-                            householdName = householdName,
-                            name = userName,
-                            color = personColorToHex(colors[selectedColor]),
-                            emoji = selectedEmoji
-                        )
+                        EntryMode.Create -> scope.launch {
+                            val target = server.trim()
+                            withContext(Dispatchers.IO) {
+                                if (target.isNotBlank()) AppContainer.instance.reconnect(target)
+                            }
+                            viewModel.createHousehold(
+                                householdName = householdName,
+                                name = userName,
+                                color = personColorToHex(colors[selectedColor]),
+                                emoji = selectedEmoji
+                            )
+                        }
 
                         EntryMode.Join -> {
                             val invite = decodeMagicInvite(code)
