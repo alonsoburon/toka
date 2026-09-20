@@ -5,6 +5,7 @@ import com.toka.app.data.api.CreateHouseholdRequest
 import com.toka.app.data.api.CreateHouseholdResponse
 import com.toka.app.data.api.JoinHouseholdRequest
 import com.toka.app.data.api.JoinHouseholdResponse
+import com.toka.app.data.api.MeResponse
 import com.toka.app.data.api.TokaApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -69,6 +70,26 @@ class AuthRepository(
             inviteCode = response.inviteCode
         )
         response
+    }
+
+    /**
+     * Entra con un token ya emitido (por ejemplo el del seed). Es el camino que hace
+     * persistente una identidad concreta: aunque se recree la base, el token del seed
+     * sigue resolviendo a la misma persona.
+     */
+    suspend fun loginWithToken(token: String): Result<MeResponse> = runCatching {
+        val me = api().me("Bearer $token")
+        tokenStore.saveSession(
+            token = token,
+            name = me.person.name,
+            emoji = me.person.avatarEmoji,
+            color = me.person.color,
+            personId = me.person.id,
+            householdId = me.household.id.toString(),
+            householdName = me.household.name,
+            inviteCode = me.household.inviteCode ?: ""
+        )
+        me
     }
 
     /**

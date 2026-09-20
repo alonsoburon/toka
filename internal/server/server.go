@@ -20,6 +20,7 @@ func New(database *sql.DB) http.Handler {
 	mux.HandleFunc("POST /households", s.CreateHousehold)
 	mux.HandleFunc("POST /households/join", s.JoinHousehold)
 
+	mux.Handle("GET /me", authMw(http.HandlerFunc(s.GetMe)))
 	mux.Handle("GET /households/{hid}/people", authMw(http.HandlerFunc(s.ListPeople)))
 	mux.Handle("POST /households/{hid}/people", authMw(http.HandlerFunc(s.CreatePerson)))
 	mux.Handle("PATCH /people/{id}", authMw(http.HandlerFunc(s.UpdatePerson)))

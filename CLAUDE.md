@@ -191,6 +191,7 @@ Fuente de verdad: `internal/server/server.go`.
 | GET | `/healthz` | — | `Health` — sondeo de disponibilidad `{"status":"ok"}` |
 | POST | `/households` | — | `CreateHousehold` — crea household + persona admin, devuelve token |
 | POST | `/households/join` | — | `JoinHousehold` — por `invite_code` |
+| GET | `/me` | Bearer | `GetMe` — persona + hogar del token (login por token) |
 | GET | `/households/{hid}/people` | Bearer | `ListPeople` |
 | POST | `/households/{hid}/regenerate-invite` | Bearer | `RegenerateInvite` |
 | POST | `/households/{hid}/leave` | Bearer | `LeaveHousehold` — borra tu propia persona (falla si eres la última) |

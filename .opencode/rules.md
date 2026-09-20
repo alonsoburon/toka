@@ -57,6 +57,7 @@ Fuente de verdad: `internal/server/server.go`.
 | GET | `/healthz` | No | Sonda de disponibilidad |
 | POST | `/households` | No | Create household + admin person |
 | POST | `/households/join` | No | Join household via invite code |
+| GET | `/me` | Bearer | Person + household of the token |
 | GET | `/households/{hid}/people` | Bearer | List household members |
 | POST | `/households/{hid}/people` | Bearer | Add person (devuelve token) |
 | PATCH | `/people/{id}` | Bearer | Update person name/color/emoji |

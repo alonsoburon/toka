@@ -1,4 +1,4 @@
-.PHONY: run run-seed build db-reset curl-setup
+.PHONY: run run-seed build db-reset curl-setup smoke
 
 # ── Base de datos SQLite: no hay daemon ni roles que administrar ──
 
@@ -17,6 +17,11 @@ build:
 db-reset:
 	rm -f toka.db toka.db-shm toka.db-wal
 	$(MAKE) run-seed
+
+# ── Smoke tests contra una base temporal (no toca toka.db) ──
+
+smoke:
+	bash .claude/scripts/smoke-local.sh
 
 # ── Curl cheatsheet ──
 

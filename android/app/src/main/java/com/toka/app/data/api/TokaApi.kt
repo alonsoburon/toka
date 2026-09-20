@@ -16,6 +16,10 @@ interface TokaApi {
     @GET("healthz")
     suspend fun health(): HealthResponse
 
+    /** Persona + hogar del token. Permite entrar con un token ya emitido. */
+    @GET("me")
+    suspend fun me(@Header("Authorization") token: String): MeResponse
+
     // ── Sincronización offline ────────────────────────────────────────────────
 
     /** Todo lo que cambió en el household después del cursor. */

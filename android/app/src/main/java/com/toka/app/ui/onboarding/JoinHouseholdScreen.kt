@@ -65,10 +65,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class EntryMode { Join, Create, Token }
+
 /**
- * Pantalla de entrada. Dos caminos: unirse con un código que ya trae servidor y hogar,
- * o crear un hogar desde cero (sin código). En ambos la persona pone su nombre y elige
- * cómo se ve.
+ * Pantalla de entrada. Tres caminos:
+ *  - Unirse con un código que trae servidor, hogar y código de invitación.
+ *  - Crear un hogar desde cero.
+ *  - Entrar con un token ya emitido (identidad persistente, como la del seed).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,15 +81,19 @@ fun JoinHouseholdScreen(
 ) {
     val state by viewModel.createState.collectAsStateWithLifecycle()
 
-    var isCreating by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(EntryMode.Join) }
     var code by remember { mutableStateOf("") }
     var householdName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
     var selectedColor by remember { mutableIntStateOf(0) }
     var selectedEmoji by remember { mutableStateOf("🐱") }
 
-    val canSubmit = userName.isNotBlank() &&
-        (if (isCreating) householdName.isNotBlank() else code.isNotBlank())
+    val canSubmit = when (mode) {
+        EntryMode.Join -> code.isNotBlank() && userName.isNotBlank()
+        EntryMode.Create -> householdName.isNotBlank() && userName.isNotBlank()
+        EntryMode.Token -> token.isNotBlank()
+    }
 
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -140,8 +147,11 @@ fun JoinHouseholdScreen(
 
             Text(
                 text = stringResource(
-                    if (isCreating) R.string.onboarding_create_subtitle
-                    else R.string.onboarding_join_subtitle
+                    when (mode) {
+                        EntryMode.Join -> R.string.onboarding_join_subtitle
+                        EntryMode.Create -> R.string.onboarding_create_subtitle
+                        EntryMode.Token -> R.string.onboarding_token_subtitle
+                    }
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted,
@@ -153,23 +163,29 @@ fun JoinHouseholdScreen(
 
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 SegmentedButton(
-                    selected = !isCreating,
-                    onClick = { isCreating = false },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    selected = mode == EntryMode.Join,
+                    onClick = { mode = EntryMode.Join },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
                     enabled = state !is OnboardingUiState.Loading
                 ) { Text(stringResource(R.string.onboarding_join_tab)) }
                 SegmentedButton(
-                    selected = isCreating,
-                    onClick = { isCreating = true },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    selected = mode == EntryMode.Create,
+                    onClick = { mode = EntryMode.Create },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
                     enabled = state !is OnboardingUiState.Loading
                 ) { Text(stringResource(R.string.onboarding_create_tab)) }
+                SegmentedButton(
+                    selected = mode == EntryMode.Token,
+                    onClick = { mode = EntryMode.Token },
+                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                    enabled = state !is OnboardingUiState.Loading
+                ) { Text(stringResource(R.string.onboarding_token_tab)) }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (isCreating) {
-                OutlinedTextField(
+            when (mode) {
+                EntryMode.Create -> OutlinedTextField(
                     value = householdName,
                     onValueChange = { householdName = it },
                     label = { Text(stringResource(R.string.onboarding_household_name)) },
@@ -178,8 +194,8 @@ fun JoinHouseholdScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state !is OnboardingUiState.Loading
                 )
-            } else {
-                OutlinedTextField(
+
+                EntryMode.Join -> OutlinedTextField(
                     value = code,
                     onValueChange = { code = it },
                     label = { Text(stringResource(R.string.onboarding_code_label)) },
@@ -189,118 +205,130 @@ fun JoinHouseholdScreen(
                         .heightIn(min = 96.dp),
                     enabled = state !is OnboardingUiState.Loading
                 )
+
+                EntryMode.Token -> OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    label = { Text(stringResource(R.string.onboarding_token_label)) },
+                    supportingText = { Text(stringResource(R.string.onboarding_token_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state !is OnboardingUiState.Loading
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            if (mode != EntryMode.Token) {
+                Spacer(modifier = Modifier.height(12.dp))
 
-            OutlinedTextField(
-                value = userName,
-                onValueChange = { userName = it },
-                label = { Text(stringResource(R.string.onboarding_name_label)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = state !is OnboardingUiState.Loading
-            )
+                OutlinedTextField(
+                    value = userName,
+                    onValueChange = { userName = it },
+                    label = { Text(stringResource(R.string.onboarding_name_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state !is OnboardingUiState.Loading
+                )
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = stringResource(R.string.onboarding_color_label),
-                style = MaterialTheme.typography.labelLarge,
-                color = TextPrimary,
-                modifier = Modifier.fillMaxWidth()
-            )
+                Text(
+                    text = stringResource(R.string.onboarding_color_label),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextPrimary,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                colors.forEachIndexed { index, color ->
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .then(
-                                if (index == selectedColor) {
-                                    Modifier.border(3.dp, Color.White, CircleShape)
-                                } else {
-                                    Modifier.border(3.dp, Color.Transparent, CircleShape)
-                                }
-                            )
-                            .clickable { selectedColor = index }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = stringResource(R.string.onboarding_avatar_label),
-                style = MaterialTheme.typography.labelLarge,
-                color = TextPrimary,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(emojis) { emoji ->
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (selectedEmoji == emoji) Pink.copy(alpha = 0.2f)
-                                else CardBg
-                            )
-                            .clickable { selectedEmoji = emoji },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = emoji, fontSize = 26.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = CardBg),
-                modifier = Modifier.fillMaxWidth()
-            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(colors[selectedColor]),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = selectedEmoji, fontSize = 24.sp)
+                    colors.forEachIndexed { index, color ->
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .then(
+                                    if (index == selectedColor) {
+                                        Modifier.border(3.dp, Color.White, CircleShape)
+                                    } else {
+                                        Modifier.border(3.dp, Color.Transparent, CircleShape)
+                                    }
+                                )
+                                .clickable { selectedColor = index }
+                        )
                     }
+                }
 
-                    Column {
-                        Text(
-                            text = userName.ifEmpty { stringResource(R.string.onboarding_name_placeholder) },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = stringResource(R.string.onboarding_preview_caption),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextMuted
-                        )
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = stringResource(R.string.onboarding_avatar_label),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextPrimary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(emojis) { emoji ->
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selectedEmoji == emoji) Pink.copy(alpha = 0.2f)
+                                    else CardBg
+                                )
+                                .clickable { selectedEmoji = emoji },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = emoji, fontSize = 26.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(colors[selectedColor]),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = selectedEmoji, fontSize = 24.sp)
+                        }
+
+                        Column {
+                            Text(
+                                text = userName.ifEmpty { stringResource(R.string.onboarding_name_placeholder) },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = stringResource(R.string.onboarding_preview_caption),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                        }
                     }
                 }
             }
@@ -309,37 +337,41 @@ fun JoinHouseholdScreen(
 
             Button(
                 onClick = {
-                    val colorHex = personColorToHex(colors[selectedColor])
-                    if (isCreating) {
-                        viewModel.createHousehold(
+                    when (mode) {
+                        EntryMode.Token -> viewModel.loginWithToken(token)
+
+                        EntryMode.Create -> viewModel.createHousehold(
                             householdName = householdName,
                             name = userName,
-                            color = colorHex,
+                            color = personColorToHex(colors[selectedColor]),
                             emoji = selectedEmoji
                         )
-                        return@Button
-                    }
-                    val invite = decodeMagicInvite(code)
-                    if (invite == null) {
-                        scope.launch { snackbarHostState.showSnackbar(invalidCodeMessage) }
-                        return@Button
-                    }
-                    scope.launch {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                AppContainer.instance.reconnect(invite.server)
+
+                        EntryMode.Join -> {
+                            val invite = decodeMagicInvite(code)
+                            if (invite == null) {
+                                scope.launch { snackbarHostState.showSnackbar(invalidCodeMessage) }
+                                return@Button
                             }
-                            viewModel.joinHousehold(
-                                inviteCode = invite.code,
-                                name = userName,
-                                color = colorHex,
-                                emoji = selectedEmoji,
-                                householdName = invite.household
-                            )
-                        } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.onboarding_connect_error, e.message)
-                            )
+                            val colorHex = personColorToHex(colors[selectedColor])
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        AppContainer.instance.reconnect(invite.server)
+                                    }
+                                    viewModel.joinHousehold(
+                                        inviteCode = invite.code,
+                                        name = userName,
+                                        color = colorHex,
+                                        emoji = selectedEmoji,
+                                        householdName = invite.household
+                                    )
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(
+                                        context.getString(R.string.onboarding_connect_error, e.message)
+                                    )
+                                }
+                            }
                         }
                     }
                 },
@@ -358,7 +390,11 @@ fun JoinHouseholdScreen(
                 } else {
                     Text(
                         stringResource(
-                            if (isCreating) R.string.onboarding_create else R.string.onboarding_enter
+                            when (mode) {
+                                EntryMode.Join -> R.string.onboarding_enter
+                                EntryMode.Create -> R.string.onboarding_create
+                                EntryMode.Token -> R.string.onboarding_token_enter
+                            }
                         ),
                         fontSize = 16.sp
                     )

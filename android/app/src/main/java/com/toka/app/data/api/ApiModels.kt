@@ -9,6 +9,12 @@ data class HealthResponse(
 )
 
 @Serializable
+data class MeResponse(
+    val person: PersonDTO,
+    val household: HouseholdDTO
+)
+
+@Serializable
 data class CreateHouseholdRequest(
     val name: String,
     @SerialName("admin_name")

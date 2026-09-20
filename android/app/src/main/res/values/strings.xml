@@ -171,7 +171,12 @@
     <string name="onboarding_create_subtitle">Crea tu hogar y empieza de cero</string>
     <string name="onboarding_join_subtitle">Pega el código que te compartieron</string>
     <string name="onboarding_join_tab">Unirse</string>
-    <string name="onboarding_create_tab">Crear hogar</string>
+    <string name="onboarding_create_tab">Crear</string>
+    <string name="onboarding_token_tab">Token</string>
+    <string name="onboarding_token_subtitle">Entra con una identidad ya existente</string>
+    <string name="onboarding_token_label">Token de acceso</string>
+    <string name="onboarding_token_hint">El token que te dio el servidor (por ejemplo, el del seed).</string>
+    <string name="onboarding_token_enter">Entrar con token</string>
     <string name="onboarding_household_name">Nombre del hogar</string>
     <string name="onboarding_household_placeholder">Casa de los Gómez</string>
     <string name="onboarding_code_label">Código</string>

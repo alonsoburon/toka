@@ -15,11 +15,11 @@ const (
 )
 
 type Person struct {
-	ID          int64
-	HouseholdID int64
-	Name        string
-	Color       string
-	AvatarEmoji string
+	ID          int64  `json:"id"`
+	HouseholdID int64  `json:"household_id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	AvatarEmoji string `json:"avatar_emoji"`
 }
 
 // Middleware resuelve el bearer token a una persona y deja en el contexto tanto la

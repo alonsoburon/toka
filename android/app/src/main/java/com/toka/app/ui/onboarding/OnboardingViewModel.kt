@@ -55,6 +55,17 @@ class OnboardingViewModel(
         }
     }
 
+    fun loginWithToken(token: String) {
+        viewModelScope.launch {
+            _createState.value = OnboardingUiState.Loading
+            authRepository.loginWithToken(token.trim())
+                .onSuccess { _createState.value = OnboardingUiState.Success(it.person.id.toString()) }
+                .onFailure {
+                    _createState.value = OnboardingUiState.Error(it.message ?: "Error desconocido")
+                }
+        }
+    }
+
     fun reset() {
         _createState.value = OnboardingUiState.Idle
     }
