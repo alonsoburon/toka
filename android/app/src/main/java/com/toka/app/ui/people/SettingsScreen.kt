@@ -229,7 +229,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         label = { Text(stringResource(R.string.settings_server_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("http://192.168.100.8:3000") }
+                        placeholder = { Text("https://8-235-73-211.sslip.io") }
                     )
                 }
             },

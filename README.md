@@ -45,6 +45,26 @@ cd android && ./gradlew assembleDebug
 La URL del backend está en `buildConfigField("String", "BASE_URL", ...)` dentro de
 `android/app/build.gradle.kts`.
 
+## Servidor en producción
+
+El backend corre en una VM **e2-micro Always Free** de GCP:
+
+- Instancia `toka` · proyecto `toka-personal` · zona `us-west1-b`
+- URL pública: `https://8-235-73-211.sslip.io` (Caddy + Let's Encrypt)
+- systemd `toka` · binario `/opt/toka/toka` · SQLite `/opt/toka/toka.db`
+
+Deploy de una versión nueva:
+
+```bash
+GOOS=linux GOARCH=amd64 go build -o /tmp/toka-linux .
+gcloud compute scp /tmp/toka-linux toka:/tmp/ \
+  --zone us-west1-b --project toka-personal --tunnel-through-iap
+gcloud compute ssh toka --zone us-west1-b --project toka-personal --tunnel-through-iap \
+  --command "sudo install -o toka -g toka -m755 /tmp/toka-linux /opt/toka/toka && sudo systemctl restart toka"
+```
+
+El SSH solo entra por IAP: requiere `gcloud auth login nuxapower@gmail.com`.
+
 ## Releases e instalación con Obtainium
 
 Cada tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que compila un APK firmado y

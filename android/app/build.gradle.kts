@@ -36,7 +36,9 @@ android {
         versionCode = (project.findProperty("tokaVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("tokaVersionName") as String?) ?: "0.1.0-dev"
 
-        buildConfigField("String", "BASE_URL", "\"http://192.168.100.8:3000/\"")
+        // Server Always Free de GCP (e2-micro "toka", us-west1) detrás de Caddy.
+        // Se puede cambiar en Ajustes → Cambiar servidor o en el onboarding.
+        buildConfigField("String", "BASE_URL", "\"https://8-235-73-211.sslip.io/\"")
     }
 
     signingConfigs {
