@@ -1,4 +1,194 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Toka</string>
+
+    <!-- Navegación -->
+    <string name="nav_tasks">Tareas</string>
+    <string name="nav_templates">Plantillas</string>
+    <string name="nav_history">Historial</string>
+    <string name="nav_people">Personas</string>
+    <string name="nav_settings">Ajustes</string>
+
+    <!-- Comunes -->
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_save">Guardar</string>
+    <string name="common_delete">Eliminar</string>
+    <string name="common_add">Añadir</string>
+    <string name="common_ok">OK</string>
+    <string name="common_accept">Aceptar</string>
+    <string name="common_back">Volver</string>
+    <string name="common_generate">Generar</string>
+    <string name="common_share">Compartir</string>
+    <string name="common_copy">Copiar</string>
+    <string name="common_anyone">Cualquiera</string>
+    <string name="common_error">Algo salió mal</string>
+    <string name="common_you">Tú</string>
+
+    <!-- Fechas -->
+    <string name="date_today">Hoy</string>
+    <string name="date_tomorrow">Mañana</string>
+    <string name="date_yesterday">Ayer</string>
+    <string name="date_none">Sin fecha</string>
+    <string name="date_change">Cambiar fecha</string>
+    <plurals name="date_in_days">
+        <item quantity="one">En %1$d día</item>
+        <item quantity="other">En %1$d días</item>
+    </plurals>
+    <plurals name="date_days_ago">
+        <item quantity="one">Hace %1$d día</item>
+        <item quantity="other">Hace %1$d días</item>
+    </plurals>
+
+    <!-- Tareas (dashboard y tarjeta) -->
+    <string name="task_complete">Completar</string>
+    <string name="task_skip">Saltar</string>
+    <string name="task_done_label">Listo</string>
+    <string name="task_ready_toast">\"%1$s\" lista</string>
+    <string name="task_undo">Deshacer</string>
+    <string name="task_created">Plantilla creada</string>
+    <string name="tasks_empty_title">No hay tareas</string>
+    <string name="tasks_empty_subtitle">Toca + para crear una</string>
+    <string name="tasks_section_overdue">❗ Atrasadas</string>
+    <string name="tasks_section_soon">⏳ Pronto</string>
+    <string name="tasks_section_upcoming">📋 Próximas</string>
+    <string name="tasks_create_template">Crear plantilla</string>
+
+    <!-- Recordatorios -->
+    <string name="reminders_title">Recordatorios</string>
+    <string name="reminders_none">Sin avisos</string>
+    <string name="reminders_add_hour">Añadir hora</string>
+    <string name="reminders_add_title">Añadir recordatorio</string>
+    <string name="reminders_remove">Quitar %1$s</string>
+
+    <!-- Detalle de tarea -->
+    <string name="detail_fallback_title">Tarea</string>
+    <string name="detail_due">Vencimiento</string>
+    <string name="detail_assigned_to">Asignado a</string>
+    <string name="detail_unassigned">Sin asignar</string>
+    <string name="detail_assigned">Asignado</string>
+    <string name="detail_to_assign">Por asignar</string>
+    <string name="detail_assign_to">Asignar a</string>
+    <string name="detail_notes">Notas: %1$s</string>
+    <string name="detail_complete">✓ Completar</string>
+    <string name="detail_completed">✓ Completada</string>
+    <string name="detail_completed_by">Por %1$s</string>
+    <string name="detail_not_found">Tarea no encontrada</string>
+    <string name="detail_complete_title">Completar tarea</string>
+    <string name="detail_complete_prompt">¿Quieres añadir alguna nota?</string>
+    <string name="detail_notes_label">Notas</string>
+
+    <!-- Crear plantilla -->
+    <string name="create_title">Crear plantilla</string>
+    <string name="create_name_label">Nombre de la tarea</string>
+    <string name="create_description_label">Descripción (opcional)</string>
+    <string name="create_reminders_label">Recordatorios (opcional)</string>
+    <string name="create_type_label">Tipo</string>
+    <string name="create_once">Una sola vez</string>
+    <string name="create_recurring">Recurrente</string>
+    <string name="create_every_days">Cada cuántos días</string>
+    <string name="create_custom">Personalizado</string>
+    <string name="create_assign_label">Asignar a</string>
+    <string name="create_preview_label">Avance</string>
+    <string name="create_preview_name">Nombre de la tarea</string>
+    <string name="create_button">Crear</string>
+    <string name="create_custom_title">Días personalizados</string>
+    <string name="create_custom_days_label">Número de días</string>
+    <string name="create_error">Error al crear plantilla</string>
+    <plurals name="create_preview_recurring">
+        <item quantity="one">Recurrente cada día</item>
+        <item quantity="other">Recurrente cada %1$d días</item>
+    </plurals>
+
+    <!-- Plantillas -->
+    <string name="templates_title">Plantillas</string>
+    <string name="templates_empty_title">Sin plantillas</string>
+    <string name="templates_empty_subtitle">Toca + para crear una</string>
+    <string name="templates_delete_title">Eliminar plantilla</string>
+    <string name="templates_delete_message">¿Eliminar \"%1$s\"? Dejará de generar tareas nuevas.</string>
+    <string name="templates_once">Una sola vez</string>
+    <string name="templates_reminders">🔔 %1$s</string>
+    <string name="templates_edit_title">Editar plantilla</string>
+    <string name="templates_name_label">Nombre</string>
+    <string name="templates_description_label">Descripción (opcional)</string>
+    <plurals name="templates_recurrence_every">
+        <item quantity="one">Cada día</item>
+        <item quantity="other">Cada %1$d días</item>
+    </plurals>
+
+    <!-- Historial -->
+    <string name="history_title">Historial</string>
+    <string name="history_empty_title">Sin historial</string>
+    <string name="history_empty_subtitle">Completa tareas para verlas aquí</string>
+    <plurals name="history_days">
+        <item quantity="one">%1$d día</item>
+        <item quantity="other">%1$d días</item>
+    </plurals>
+
+    <!-- Personas -->
+    <string name="people_title">Personas</string>
+    <string name="people_add_profile">Añadir perfil</string>
+    <string name="people_edit_title">Editar persona</string>
+    <string name="people_add_hint">Crea un perfil para asignarle tareas aunque no use la app. Para darle acceso, comparte el código de invitación.</string>
+    <string name="people_invite_title">Código de invitación</string>
+    <string name="people_invite_empty">---</string>
+    <string name="people_copied">Código copiado</string>
+    <string name="people_copy_code">Copiar código</string>
+    <string name="people_share_text">Únete a mi hogar en Toka: %1$s</string>
+    <string name="people_share_chooser">Compartir código</string>
+    <string name="people_regen_button">🔄 Nuevo código</string>
+    <string name="people_regen_title">Generar nuevo código</string>
+    <string name="people_regen_message">El código actual dejará de funcionar para quien no se haya unido todavía.</string>
+    <string name="people_regen_done">Nuevo código generado</string>
+    <string name="people_delete_title">Eliminar persona</string>
+    <string name="people_delete_message">¿Eliminar a %1$s? Sus tareas quedan sin asignar.</string>
+    <string name="people_name_label">Nombre</string>
+    <string name="people_color_label">Color</string>
+    <string name="people_avatar_label">Avatar</string>
+
+    <!-- Ajustes -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_household_title">Tu hogar</string>
+    <string name="settings_name">Nombre</string>
+    <string name="settings_code">Código</string>
+    <string name="settings_regen">Generar nuevo código</string>
+    <string name="settings_server_title">🔗 Servidor</string>
+    <string name="settings_server_url">URL actual</string>
+    <string name="settings_server_none">No configurada</string>
+    <string name="settings_change_server">Cambiar servidor</string>
+    <string name="settings_leave">Salir del hogar</string>
+    <string name="settings_leave_title">Salir del hogar</string>
+    <string name="settings_leave_message">Se eliminará tu persona del hogar y tus tareas quedarán sin asignar. Necesita conexión.</string>
+    <string name="settings_leave_confirm">Salir</string>
+    <string name="settings_logout">Cerrar sesión (solo este teléfono)</string>
+    <string name="settings_server_prompt">Ingresa la nueva URL del servidor:</string>
+    <string name="settings_server_label">URL del servidor</string>
+    <string name="settings_server_failed">No se pudo conectar: revisa la URL y que el server esté arriba</string>
+    <string name="settings_testing">Probando…</string>
+    <string name="settings_leave_failed">No se pudo salir del hogar</string>
+    <string name="settings_default_household">Mi hogar</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_create_subtitle">Crea tu hogar y empieza de cero</string>
+    <string name="onboarding_join_subtitle">Pega el código que te compartieron</string>
+    <string name="onboarding_join_tab">Unirse</string>
+    <string name="onboarding_create_tab">Crear hogar</string>
+    <string name="onboarding_household_name">Nombre del hogar</string>
+    <string name="onboarding_household_placeholder">Casa de los Gómez</string>
+    <string name="onboarding_code_label">Código</string>
+    <string name="onboarding_name_label">Tu nombre</string>
+    <string name="onboarding_name_placeholder">Tu nombre</string>
+    <string name="onboarding_color_label">Tu color</string>
+    <string name="onboarding_avatar_label">Tu avatar</string>
+    <string name="onboarding_preview_caption">Así te verán en el hogar</string>
+    <string name="onboarding_enter">Entrar</string>
+    <string name="onboarding_create">Crear hogar</string>
+    <string name="onboarding_invalid_code">El código no es válido</string>
+    <string name="onboarding_connect_error">No se pudo conectar al servidor: %1$s</string>
+
+    <!-- Notificaciones -->
+    <string name="notif_channel_name">Recordatorios</string>
+    <string name="notif_channel_description">Tareas que debes hacer hoy</string>
+    <string name="notif_complete_action">✓ Completar</string>
+    <string name="notif_skip_action">Saltar</string>
+    <string name="notif_text">Pendiente · aviso de las %1$s</string>
 </resources>

@@ -15,8 +15,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.toka.app.R
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.ui.theme.*
 import java.time.Instant
@@ -52,14 +55,17 @@ private fun dueStatus(dateString: String?): TaskDueStatus {
     return if (diff in 0..1) TaskDueStatus.DUE_SOON else TaskDueStatus.NORMAL
 }
 
+@Composable
 private fun relativeDateText(dateString: String?): String {
     val date = parseDate(dateString) ?: return ""
     val today = LocalDate.now()
     val diff = ChronoUnit.DAYS.between(today, date)
     return when {
-        diff == 0L -> "Hoy" ; diff == 1L -> "Mañana" ; diff == -1L -> "Ayer"
-        diff > 0 -> "en $diff días"
-        else -> "hace ${-diff} días"
+        diff == 0L -> stringResource(R.string.date_today)
+        diff == 1L -> stringResource(R.string.date_tomorrow)
+        diff == -1L -> stringResource(R.string.date_yesterday)
+        diff > 0 -> pluralStringResource(R.plurals.date_in_days, diff.toInt(), diff.toInt())
+        else -> pluralStringResource(R.plurals.date_days_ago, (-diff).toInt(), (-diff).toInt())
     }
 }
 
@@ -90,7 +96,7 @@ fun TaskCard(
     else Pink
 
     val emoji = task.assignedToEmoji ?: "👤"
-    val title = task.templateName ?: "Tarea"
+    val title = task.templateName ?: stringResource(R.string.detail_fallback_title)
 
     Card(
         modifier = modifier
@@ -153,7 +159,8 @@ fun TaskCard(
             if (isPending) {
                 IconButton(onClick = onComplete) {
                     Icon(
-                        Icons.Default.CheckCircle, "Completar",
+                        Icons.Default.CheckCircle,
+                        contentDescription = stringResource(R.string.task_complete),
                         tint = CompleteGreen,
                         modifier = Modifier.size(32.dp)
                     )

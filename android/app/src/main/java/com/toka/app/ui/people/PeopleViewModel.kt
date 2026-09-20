@@ -59,6 +59,21 @@ class PeopleViewModel(
         }
     }
 
+    fun updatePerson(id: Long, name: String, color: String, emoji: String) {
+        viewModelScope.launch {
+            peopleRepository.updatePerson(id, name, color, emoji)
+                .onSuccess {
+                    // Si me edité a mí, el header del Dashboard lee del TokenStore.
+                    if (id == tokenStore.getPersonId()) {
+                        tokenStore.updateProfile(name, color, emoji)
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(error = e.message ?: "Error al guardar persona") }
+                }
+        }
+    }
+
     fun deletePerson(id: Long) {
         viewModelScope.launch {
             peopleRepository.deletePerson(id)

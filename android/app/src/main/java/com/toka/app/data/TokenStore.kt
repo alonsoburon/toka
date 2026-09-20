@@ -63,6 +63,15 @@ class TokenStore(private val context: Context) {
         context.dataStore.edit { it[inviteCodeKey] = code }
     }
 
+    /** Actualiza nombre/color/emoji de la propia persona tras editarla. */
+    suspend fun updateProfile(name: String, color: String, emoji: String) {
+        context.dataStore.edit {
+            it[nameKey] = name
+            it[colorKey] = color
+            it[emojiKey] = emoji
+        }
+    }
+
     suspend fun saveServerUrl(url: String) {
         context.dataStore.edit { it[serverUrlKey] = url }
     }

@@ -34,9 +34,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.toka.app.R
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.components.EmptyState
@@ -65,7 +68,7 @@ fun HistoryScreen() {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Historial",
+                        text = stringResource(R.string.history_title),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -90,7 +93,7 @@ fun HistoryScreen() {
                     FilterChip(
                         selected = viewModel.days == days,
                         onClick = { viewModel.setDays(days) },
-                        label = { Text("$days días") },
+                        label = { Text(pluralStringResource(R.plurals.history_days, days, days)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Pink.copy(alpha = 0.15f),
                             selectedLabelColor = Pink
@@ -130,7 +133,11 @@ fun HistoryScreen() {
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        EmptyState(icon = "📜", title = "Sin historial", subtitle = "Completa tareas para verlas aquí")
+                        EmptyState(
+                            icon = "📜",
+                            title = stringResource(R.string.history_empty_title),
+                            subtitle = stringResource(R.string.history_empty_subtitle)
+                        )
                     }
                 }
                 else -> {

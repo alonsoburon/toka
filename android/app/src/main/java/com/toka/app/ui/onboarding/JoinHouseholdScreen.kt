@@ -46,11 +46,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.toka.app.R
 import com.toka.app.data.api.decodeMagicInvite
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.theme.CardBg
@@ -88,6 +91,8 @@ fun JoinHouseholdScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val colors = personColors()
+    val context = LocalContext.current
+    val invalidCodeMessage = stringResource(R.string.onboarding_invalid_code)
 
     val emojis = listOf(
         "🐱", "🐶", "🦊", "🐸", "🐼", "🐨", "🐰", "🐯", "🐮",
@@ -134,8 +139,10 @@ fun JoinHouseholdScreen(
             )
 
             Text(
-                text = if (isCreating) "Crea tu hogar y empieza de cero"
-                else "Pega el código que te compartieron",
+                text = stringResource(
+                    if (isCreating) R.string.onboarding_create_subtitle
+                    else R.string.onboarding_join_subtitle
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted,
                 textAlign = TextAlign.Center,
@@ -150,13 +157,13 @@ fun JoinHouseholdScreen(
                     onClick = { isCreating = false },
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                     enabled = state !is OnboardingUiState.Loading
-                ) { Text("Unirse") }
+                ) { Text(stringResource(R.string.onboarding_join_tab)) }
                 SegmentedButton(
                     selected = isCreating,
                     onClick = { isCreating = true },
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                     enabled = state !is OnboardingUiState.Loading
-                ) { Text("Crear hogar") }
+                ) { Text(stringResource(R.string.onboarding_create_tab)) }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -165,8 +172,8 @@ fun JoinHouseholdScreen(
                 OutlinedTextField(
                     value = householdName,
                     onValueChange = { householdName = it },
-                    label = { Text("Nombre del hogar") },
-                    placeholder = { Text("Casa de los Gómez") },
+                    label = { Text(stringResource(R.string.onboarding_household_name)) },
+                    placeholder = { Text(stringResource(R.string.onboarding_household_placeholder)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state !is OnboardingUiState.Loading
@@ -175,7 +182,7 @@ fun JoinHouseholdScreen(
                 OutlinedTextField(
                     value = code,
                     onValueChange = { code = it },
-                    label = { Text("Código") },
+                    label = { Text(stringResource(R.string.onboarding_code_label)) },
                     placeholder = { Text("eyJzZXJ2ZXIiOiJodHRwczovL...") },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -189,7 +196,7 @@ fun JoinHouseholdScreen(
             OutlinedTextField(
                 value = userName,
                 onValueChange = { userName = it },
-                label = { Text("Tu nombre") },
+                label = { Text(stringResource(R.string.onboarding_name_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = state !is OnboardingUiState.Loading
@@ -198,7 +205,7 @@ fun JoinHouseholdScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = "Tu color",
+                text = stringResource(R.string.onboarding_color_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary,
                 modifier = Modifier.fillMaxWidth()
@@ -231,7 +238,7 @@ fun JoinHouseholdScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = "Tu avatar",
+                text = stringResource(R.string.onboarding_avatar_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary,
                 modifier = Modifier.fillMaxWidth()
@@ -285,12 +292,12 @@ fun JoinHouseholdScreen(
 
                     Column {
                         Text(
-                            text = userName.ifEmpty { "Tu nombre" },
+                            text = userName.ifEmpty { stringResource(R.string.onboarding_name_placeholder) },
                             style = MaterialTheme.typography.titleMedium,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Así te verán en el hogar",
+                            text = stringResource(R.string.onboarding_preview_caption),
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted
                         )
@@ -314,7 +321,7 @@ fun JoinHouseholdScreen(
                     }
                     val invite = decodeMagicInvite(code)
                     if (invite == null) {
-                        scope.launch { snackbarHostState.showSnackbar("El código no es válido") }
+                        scope.launch { snackbarHostState.showSnackbar(invalidCodeMessage) }
                         return@Button
                     }
                     scope.launch {
@@ -331,7 +338,7 @@ fun JoinHouseholdScreen(
                             )
                         } catch (e: Exception) {
                             snackbarHostState.showSnackbar(
-                                "No se pudo conectar al servidor: ${e.message}"
+                                context.getString(R.string.onboarding_connect_error, e.message)
                             )
                         }
                     }
@@ -349,7 +356,12 @@ fun JoinHouseholdScreen(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text(if (isCreating) "Crear hogar" else "Entrar", fontSize = 16.sp)
+                    Text(
+                        stringResource(
+                            if (isCreating) R.string.onboarding_create else R.string.onboarding_enter
+                        ),
+                        fontSize = 16.sp
+                    )
                 }
             }
 

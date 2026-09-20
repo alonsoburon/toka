@@ -13,9 +13,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.toka.app.R
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.theme.*
 import kotlinx.coroutines.launch
@@ -36,17 +38,19 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var isLeaving by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val connectFailedMessage = stringResource(R.string.settings_server_failed)
+    val leaveFailedMessage = stringResource(R.string.settings_leave_failed)
 
     val emoji = userEmoji ?: "🐣"
-    val name = userName ?: "Tú"
-    val houseName = householdName ?: "Mi hogar"
+    val name = userName ?: stringResource(R.string.common_you)
+    val houseName = householdName ?: stringResource(R.string.settings_default_household)
     val code = inviteCode ?: "---"
 
     Scaffold(
         containerColor = SurfaceBg,
         topBar = {
             TopAppBar(
-                title = { Text("Ajustes", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold, color = TextPrimary) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg)
             )
         },
@@ -86,15 +90,15 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Tu hogar", style = MaterialTheme.typography.labelLarge, color = Pink)
+                    Text(stringResource(R.string.settings_household_title), style = MaterialTheme.typography.labelLarge, color = Pink)
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Nombre", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_name), color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
                         Text(houseName, color = TextPrimary, fontWeight = FontWeight.Medium)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Código", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_code), color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
                         Text(code, color = Pink, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, style = MaterialTheme.typography.bodyMedium)
                     }
                     Spacer(Modifier.height(4.dp))
@@ -112,7 +116,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                             }
                         }
                     ) {
-                        Text("Generar nuevo código", color = Pink, fontSize = 12.sp)
+                        Text(stringResource(R.string.settings_regen), color = Pink, fontSize = 12.sp)
                     }
                 }
             }
@@ -125,15 +129,15 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("🔗 Servidor", style = MaterialTheme.typography.labelLarge, color = Pink)
+                    Text(stringResource(R.string.settings_server_title), style = MaterialTheme.typography.labelLarge, color = Pink)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "URL actual",
+                        text = stringResource(R.string.settings_server_url),
                         color = TextSecondary,
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = serverUrl ?: "No configurada",
+                        text = serverUrl ?: stringResource(R.string.settings_server_none),
                         color = TextPrimary,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -143,7 +147,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         onClick = { showServerDialog = true },
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Cambiar servidor", color = Pink, fontSize = 12.sp)
+                        Text(stringResource(R.string.settings_change_server), color = Pink, fontSize = 12.sp)
                     }
                 }
             }
@@ -156,7 +160,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = SkipRed),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Salir del hogar")
+                Text(stringResource(R.string.settings_leave))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -172,7 +176,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
             ) {
                 Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Cerrar sesión (solo este teléfono)", color = TextSecondary)
+                Text(stringResource(R.string.settings_logout), color = TextSecondary)
             }
         }
     }
@@ -180,10 +184,8 @@ fun SettingsScreen(onLogout: () -> Unit) {
     if (showLeaveConfirm) {
         AlertDialog(
             onDismissRequest = { showLeaveConfirm = false },
-            title = { Text("Salir del hogar") },
-            text = {
-                Text("Se eliminará tu persona del hogar y tus tareas quedarán sin asignar. Necesita conexión.")
-            },
+            title = { Text(stringResource(R.string.settings_leave_title)) },
+            text = { Text(stringResource(R.string.settings_leave_message)) },
             confirmButton = {
                 TextButton(
                     enabled = !isLeaving,
@@ -197,16 +199,18 @@ fun SettingsScreen(onLogout: () -> Unit) {
                                 }
                                 .onFailure {
                                     snackbarHostState.showSnackbar(
-                                        it.message ?: "No se pudo salir del hogar"
+                                        it.message ?: leaveFailedMessage
                                     )
                                 }
                             isLeaving = false
                         }
                     }
-                ) { Text("Salir", color = SkipRed) }
+                ) { Text(stringResource(R.string.settings_leave_confirm), color = SkipRed) }
             },
             dismissButton = {
-                TextButton(onClick = { showLeaveConfirm = false }) { Text("Cancelar") }
+                TextButton(onClick = { showLeaveConfirm = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }
@@ -214,15 +218,15 @@ fun SettingsScreen(onLogout: () -> Unit) {
     if (showServerDialog) {
         AlertDialog(
             onDismissRequest = { showServerDialog = false },
-            title = { Text("Cambiar servidor") },
+            title = { Text(stringResource(R.string.settings_change_server)) },
             text = {
                 Column {
-                    Text("Ingresa la nueva URL del servidor:")
+                    Text(stringResource(R.string.settings_server_prompt))
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = newServerUrl,
                         onValueChange = { newServerUrl = it },
-                        label = { Text("URL del servidor") },
+                        label = { Text(stringResource(R.string.settings_server_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("http://192.168.100.8:3000") }
@@ -244,18 +248,24 @@ fun SettingsScreen(onLogout: () -> Unit) {
                                         onLogout()
                                     }
                                     .onFailure {
-                                        snackbarHostState.showSnackbar(
-                                            "No se pudo conectar: revisa la URL y que el server esté arriba"
-                                        )
+                                        snackbarHostState.showSnackbar(connectFailedMessage)
                                     }
                                 isCheckingServer = false
                             }
                         }
                     }
-                ) { Text(if (isCheckingServer) "Probando…" else "Guardar", color = Pink) }
+                ) {
+                    Text(
+                        if (isCheckingServer) stringResource(R.string.settings_testing)
+                        else stringResource(R.string.common_save),
+                        color = Pink
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showServerDialog = false }) { Text("Cancelar") }
+                TextButton(onClick = { showServerDialog = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }

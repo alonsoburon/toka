@@ -51,10 +51,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.toka.app.R
 import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.TemplateDTO
 import com.toka.app.data.api.UpdateTemplateRequest
@@ -96,7 +99,7 @@ fun TemplatesScreen(
         containerColor = SurfaceBg,
         topBar = {
             TopAppBar(
-                title = { Text("Plantillas", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = { Text(stringResource(R.string.templates_title), fontWeight = FontWeight.Bold, color = TextPrimary) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg)
             )
         },
@@ -106,7 +109,7 @@ fun TemplatesScreen(
                 containerColor = Pink,
                 contentColor = Color.White
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Crear plantilla")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.tasks_create_template))
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -115,8 +118,8 @@ fun TemplatesScreen(
             uiState.isLoading -> LoadingShimmer()
             uiState.templates.isEmpty() -> EmptyState(
                 icon = "🔁",
-                title = "Sin plantillas",
-                subtitle = "Toca + para crear una"
+                title = stringResource(R.string.templates_empty_title),
+                subtitle = stringResource(R.string.templates_empty_subtitle)
             )
             else -> LazyColumn(
                 modifier = Modifier
@@ -153,16 +156,16 @@ fun TemplatesScreen(
     toDelete?.let { template ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
-            title = { Text("Eliminar plantilla") },
-            text = { Text("¿Eliminar \"${template.name}\"? Dejará de generar tareas nuevas.") },
+            title = { Text(stringResource(R.string.templates_delete_title)) },
+            text = { Text(stringResource(R.string.templates_delete_message, template.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(template.id)
                     toDelete = null
-                }) { Text("Eliminar", color = SkipRed) }
+                }) { Text(stringResource(R.string.common_delete), color = SkipRed) }
             },
             dismissButton = {
-                TextButton(onClick = { toDelete = null }) { Text("Cancelar") }
+                TextButton(onClick = { toDelete = null }) { Text(stringResource(R.string.common_cancel)) }
             }
         )
     }
@@ -176,7 +179,9 @@ private fun TemplateRow(
     onDelete: () -> Unit
 ) {
     val assignee = people.firstOrNull { it.id == template.preferredAssigneeId }
-    val recurrence = template.recurrenceDays?.let { "Cada $it días" } ?: "Una sola vez"
+    val recurrence = template.recurrenceDays
+        ?.let { pluralStringResource(R.plurals.templates_recurrence_every, it, it) }
+        ?: stringResource(R.string.templates_once)
     val reminders = template.reminderTimes?.takeIf { it.isNotBlank() }
 
     Card(
@@ -209,7 +214,8 @@ private fun TemplateRow(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = assignee?.let { "${it.avatarEmoji} ${it.name}" } ?: "👤 Cualquiera",
+                        text = assignee?.let { "${it.avatarEmoji} ${it.name}" }
+                            ?: "👤 ${stringResource(R.string.common_anyone)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
@@ -217,14 +223,18 @@ private fun TemplateRow(
                 if (reminders != null) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "🔔 $reminders",
+                        text = stringResource(R.string.templates_reminders, reminders),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
                 }
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = TextMuted)
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.common_delete),
+                    tint = TextMuted
+                )
             }
         }
     }
@@ -257,7 +267,7 @@ private fun EditTemplateDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Editar plantilla") },
+        title = { Text(stringResource(R.string.templates_edit_title)) },
         text = {
             Column(
                 modifier = Modifier
@@ -267,7 +277,7 @@ private fun EditTemplateDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Nombre") },
+                    label = { Text(stringResource(R.string.templates_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -277,7 +287,7 @@ private fun EditTemplateDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Descripción (opcional)") },
+                    label = { Text(stringResource(R.string.templates_description_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 3
@@ -291,12 +301,12 @@ private fun EditTemplateDialog(
                             selected = !makeRecurring,
                             onClick = { makeRecurring = false },
                             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                        ) { Text("Una sola vez") }
+                        ) { Text(stringResource(R.string.create_once)) }
                         SegmentedButton(
                             selected = makeRecurring,
                             onClick = { makeRecurring = true },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                        ) { Text("Recurrente") }
+                        ) { Text(stringResource(R.string.create_recurring)) }
                     }
                     Spacer(Modifier.height(8.dp))
                 }
@@ -305,7 +315,7 @@ private fun EditTemplateDialog(
                     OutlinedTextField(
                         value = daysText,
                         onValueChange = { daysText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Cada cuántos días") },
+                        label = { Text(stringResource(R.string.create_every_days)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -313,7 +323,7 @@ private fun EditTemplateDialog(
                 }
 
                 Text(
-                    text = "Asignar a",
+                    text = stringResource(R.string.create_assign_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = TextMuted
                 )
@@ -331,7 +341,7 @@ private fun EditTemplateDialog(
                 Spacer(Modifier.height(12.dp))
 
                 Text(
-                    text = "Recordatorios",
+                    text = stringResource(R.string.reminders_title),
                     style = MaterialTheme.typography.labelMedium,
                     color = TextMuted
                 )
@@ -357,10 +367,10 @@ private fun EditTemplateDialog(
                 },
                 enabled = name.isNotBlank() && validRecurrence,
                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
-            ) { Text("Guardar") }
+            ) { Text(stringResource(R.string.common_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         }
     )
 }

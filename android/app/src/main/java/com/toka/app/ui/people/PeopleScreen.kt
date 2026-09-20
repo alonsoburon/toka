@@ -60,10 +60,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.toka.app.R
 import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.encodeMagicInvite
 import com.toka.app.data.di.AppContainer
@@ -96,8 +98,12 @@ fun PeopleScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val copiedMessage = stringResource(R.string.people_copied)
+    val regenDoneMessage = stringResource(R.string.people_regen_done)
+    val shareText = stringResource(R.string.people_share_text, encodedInvite)
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var personToEdit by remember { mutableStateOf<PersonDTO?>(null) }
     var showRegenConfirm by remember { mutableStateOf(false) }
     var personToDelete by remember { mutableStateOf<PersonDTO?>(null) }
 
@@ -111,7 +117,7 @@ fun PeopleScreen() {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Personas",
+                        text = stringResource(R.string.people_title),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -120,7 +126,7 @@ fun PeopleScreen() {
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(
                             Icons.Default.Add,
-                            contentDescription = "Añadir persona",
+                            contentDescription = stringResource(R.string.people_add_profile),
                             tint = Pink
                         )
                     }
@@ -157,13 +163,13 @@ fun PeopleScreen() {
                             ) {
                                 Column {
                                     Text(
-                                        text = "Código de invitación",
+                                        text = stringResource(R.string.people_invite_title),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = TextMuted
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = uiState.inviteCode.ifEmpty { "---" },
+                                        text = uiState.inviteCode.ifEmpty { stringResource(R.string.people_invite_empty) },
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary,
@@ -175,25 +181,30 @@ fun PeopleScreen() {
                                     IconButton(onClick = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         clipboard.setPrimaryClip(ClipData.newPlainText("inviteCode", encodedInvite))
-                                        scope.launch { snackbarHostState.showSnackbar("Código copiado") }
+                                        scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
                                     }) {
                                         Icon(
                                             Icons.Default.ContentCopy,
-                                            contentDescription = "Copiar código",
+                                            contentDescription = stringResource(R.string.people_copy_code),
                                             tint = TextSecondary
                                         )
                                     }
                                     IconButton(onClick = {
                                         val sendIntent = Intent().apply {
                                             action = Intent.ACTION_SEND
-                                            putExtra(Intent.EXTRA_TEXT, "Únete a mi hogar en Toka: $encodedInvite")
+                                            putExtra(Intent.EXTRA_TEXT, shareText)
                                             type = "text/plain"
                                         }
-                                        context.startActivity(Intent.createChooser(sendIntent, "Compartir código"))
+                                        context.startActivity(
+                                            Intent.createChooser(
+                                                sendIntent,
+                                                context.getString(R.string.people_share_chooser)
+                                            )
+                                        )
                                     }) {
                                         Icon(
                                             Icons.Default.Share,
-                                            contentDescription = "Compartir",
+                                            contentDescription = stringResource(R.string.common_share),
                                             tint = TextSecondary
                                         )
                                     }
@@ -201,7 +212,7 @@ fun PeopleScreen() {
                             }
 
                             TextButton(onClick = { showRegenConfirm = true }) {
-                                Text("🔄 Nuevo código", color = Pink, fontSize = 12.sp)
+                                Text(stringResource(R.string.people_regen_button), color = Pink, fontSize = 12.sp)
                             }
                         }
 
@@ -213,7 +224,9 @@ fun PeopleScreen() {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = CardBg),
                             shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { personToEdit = person }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -252,7 +265,7 @@ fun PeopleScreen() {
                                     IconButton(onClick = { personToDelete = person }) {
                                         Icon(
                                             Icons.Default.Delete,
-                                            contentDescription = "Eliminar",
+                                            contentDescription = stringResource(R.string.common_delete),
                                             tint = TextMuted
                                         )
                                     }
@@ -265,12 +278,22 @@ fun PeopleScreen() {
         }
     }
 
-    if (showAddDialog) {
-        AddPersonDialog(
-            onDismiss = { showAddDialog = false },
-            onAdd = { name, color, emoji ->
-                viewModel.addPerson(name, color, emoji)
+    val editing = personToEdit
+    if (showAddDialog || editing != null) {
+        PersonFormDialog(
+            existing = editing,
+            onDismiss = {
                 showAddDialog = false
+                personToEdit = null
+            },
+            onConfirm = { name, color, emoji ->
+                if (editing != null) {
+                    viewModel.updatePerson(editing.id, name, color, emoji)
+                } else {
+                    viewModel.addPerson(name, color, emoji)
+                }
+                showAddDialog = false
+                personToEdit = null
             }
         )
     }
@@ -278,18 +301,20 @@ fun PeopleScreen() {
     if (showRegenConfirm) {
         AlertDialog(
             onDismissRequest = { showRegenConfirm = false },
-            title = { Text("Generar nuevo código") },
-            text = { Text("El código actual dejará de funcionar para quien no se haya unido todavía.") },
+            title = { Text(stringResource(R.string.people_regen_title)) },
+            text = { Text(stringResource(R.string.people_regen_message)) },
             confirmButton = {
                 TextButton(onClick = {
                     showRegenConfirm = false
                     viewModel.regenerateInvite {
-                        scope.launch { snackbarHostState.showSnackbar("Nuevo código generado") }
+                        scope.launch { snackbarHostState.showSnackbar(regenDoneMessage) }
                     }
-                }) { Text("Generar", color = Pink) }
+                }) { Text(stringResource(R.string.common_generate), color = Pink) }
             },
             dismissButton = {
-                TextButton(onClick = { showRegenConfirm = false }) { Text("Cancelar") }
+                TextButton(onClick = { showRegenConfirm = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }
@@ -297,49 +322,67 @@ fun PeopleScreen() {
     personToDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { personToDelete = null },
-            title = { Text("Eliminar persona") },
-            text = {
-                Text("¿Eliminar a ${target.name}? Sus tareas quedan sin asignar.")
-            },
+            title = { Text(stringResource(R.string.people_delete_title)) },
+            text = { Text(stringResource(R.string.people_delete_message, target.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deletePerson(target.id)
                     personToDelete = null
-                }) { Text("Eliminar", color = SkipRed) }
+                }) { Text(stringResource(R.string.common_delete), color = SkipRed) }
             },
             dismissButton = {
-                TextButton(onClick = { personToDelete = null }) { Text("Cancelar") }
+                TextButton(onClick = { personToDelete = null }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }
 }
 
 @Composable
-private fun AddPersonDialog(
+private fun PersonFormDialog(
+    existing: PersonDTO?,
     onDismiss: () -> Unit,
-    onAdd: (name: String, color: String, emoji: String) -> Unit
+    onConfirm: (name: String, color: String, emoji: String) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var selectedColor by remember { mutableIntStateOf(0) }
-    var selectedEmoji by remember { mutableStateOf("🐱") }
-
     val colors = personColors()
     val emojis = listOf("🐱", "🐶", "🦊", "🐸", "🐼", "🐨")
+
+    var name by remember(existing) { mutableStateOf(existing?.name ?: "") }
+    var selectedColor by remember(existing) {
+        mutableIntStateOf(
+            existing?.color
+                ?.let { hex -> colors.indexOfFirst { colorToHex(it).equals(hex, ignoreCase = true) } }
+                ?.takeIf { it >= 0 } ?: 0
+        )
+    }
+    var selectedEmoji by remember(existing) { mutableStateOf(existing?.avatarEmoji ?: "🐱") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Añadir persona",
+                text = stringResource(
+                    if (existing == null) R.string.people_add_profile else R.string.people_edit_title
+                ),
                 fontWeight = FontWeight.SemiBold
             )
         },
         text = {
             Column {
+                if (existing == null) {
+                    Text(
+                        text = stringResource(R.string.people_add_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Nombre") },
+                    label = { Text(stringResource(R.string.people_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -347,7 +390,7 @@ private fun AddPersonDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Color",
+                    text = stringResource(R.string.people_color_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = TextSecondary
                 )
@@ -375,7 +418,7 @@ private fun AddPersonDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Avatar",
+                    text = stringResource(R.string.people_avatar_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = TextSecondary
                 )
@@ -405,24 +448,23 @@ private fun AddPersonDialog(
         },
         confirmButton = {
             Button(
-                onClick = {
-                    val colorHex = "#%02X%02X%02X".format(
-                        (colors[selectedColor].red * 255).toInt().coerceIn(0, 255),
-                        (colors[selectedColor].green * 255).toInt().coerceIn(0, 255),
-                        (colors[selectedColor].blue * 255).toInt().coerceIn(0, 255)
-                    )
-                    onAdd(name, colorHex, selectedEmoji)
-                },
+                onClick = { onConfirm(name, colorToHex(colors[selectedColor]), selectedEmoji) },
                 enabled = name.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
             ) {
-                Text("Añadir")
+                Text(stringResource(if (existing == null) R.string.common_add else R.string.common_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancelar")
+                Text(stringResource(R.string.common_cancel))
             }
         }
     )
 }
+
+private fun colorToHex(color: Color): String = "#%02X%02X%02X".format(
+    (color.red * 255).toInt().coerceIn(0, 255),
+    (color.green * 255).toInt().coerceIn(0, 255),
+    (color.blue * 255).toInt().coerceIn(0, 255)
+)

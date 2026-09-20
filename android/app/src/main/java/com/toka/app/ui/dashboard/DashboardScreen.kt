@@ -42,10 +42,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
+import com.toka.app.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.di.AppContainer
@@ -72,7 +74,9 @@ fun DashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val userEmoji by AppContainer.instance.tokenStore.userEmoji.collectAsState(initial = "🐣")
-    val userName by AppContainer.instance.tokenStore.userName.collectAsState(initial = "Tú")
+    val userName by AppContainer.instance.tokenStore.userName.collectAsState(
+        initial = stringResource(R.string.common_you)
+    )
     val userColor by AppContainer.instance.tokenStore.userColor.collectAsState(initial = null)
     val pendingSync by AppContainer.instance.taskRepository.pendingSyncCount
         .collectAsState(initial = 0)
@@ -83,11 +87,15 @@ fun DashboardScreen(
         }
     }
 
-    LaunchedEffect(uiState.lastAction) {
-        val action = uiState.lastAction ?: return@LaunchedEffect
+    val lastAction = uiState.lastAction
+    val readyMessage = lastAction?.let { stringResource(R.string.task_ready_toast, it.name) }
+    val undoLabel = stringResource(R.string.task_undo)
+
+    LaunchedEffect(lastAction) {
+        if (lastAction == null) return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
-            message = "\"${action.name}\" lista",
-            actionLabel = "Deshacer",
+            message = readyMessage.orEmpty(),
+            actionLabel = undoLabel,
             duration = SnackbarDuration.Short
         )
         if (result == SnackbarResult.ActionPerformed) {
@@ -135,7 +143,7 @@ fun DashboardScreen(
                         }
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = userName ?: "Tú",
+                            text = userName ?: stringResource(R.string.common_you),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
@@ -163,7 +171,7 @@ fun DashboardScreen(
                 containerColor = Pink,
                 contentColor = Color.White
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Crear plantilla")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.tasks_create_template))
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -182,8 +190,8 @@ fun DashboardScreen(
                 uiState.tasks.isEmpty() && uiState.error == null -> {
                     EmptyState(
                         icon = "📋",
-                        title = "No hay tareas",
-                        subtitle = "Toca + para crear una"
+                        title = stringResource(R.string.tasks_empty_title),
+                        subtitle = stringResource(R.string.tasks_empty_subtitle)
                     )
                 }
                 else -> {
@@ -193,7 +201,7 @@ fun DashboardScreen(
                         if (overdueTasks.isNotEmpty()) {
                             stickyHeader {
                                 SectionHeader(
-                                    title = "❗ Atrasadas",
+                                    title = stringResource(R.string.tasks_section_overdue),
                                     count = overdueTasks.size,
                                     backgroundColor = Pink.copy(alpha = 0.1f),
                                     textColor = Pink
@@ -212,7 +220,7 @@ fun DashboardScreen(
                         if (soonTasks.isNotEmpty()) {
                             stickyHeader {
                                 SectionHeader(
-                                    title = "⏳ Pronto",
+                                    title = stringResource(R.string.tasks_section_soon),
                                     count = soonTasks.size,
                                     backgroundColor = Color(0xFFFFF3E0),
                                     textColor = Color(0xFFE65100)
@@ -231,7 +239,7 @@ fun DashboardScreen(
                         if (upcomingTasks.isNotEmpty()) {
                             stickyHeader {
                                 SectionHeader(
-                                    title = "📋 Próximas",
+                                    title = stringResource(R.string.tasks_section_upcoming),
                                     count = upcomingTasks.size,
                                     backgroundColor = Violet.copy(alpha = 0.08f),
                                     textColor = Violet
@@ -251,8 +259,8 @@ fun DashboardScreen(
                             item {
                                 EmptyState(
                                     icon = "📋",
-                                    title = "No hay tareas",
-                                    subtitle = "Toca + para crear una"
+                                    title = stringResource(R.string.tasks_empty_title),
+                                    subtitle = stringResource(R.string.tasks_empty_subtitle)
                                 )
                             }
                         }
@@ -319,7 +327,9 @@ private fun SwipeableTaskRow(
         backgroundContent = {
             val completing = state.dismissDirection == SwipeToDismissBoxValue.StartToEnd
             val color = if (completing) CompleteGreen else SkipRed
-            val label = if (completing) "Listo" else "Saltar"
+            val label = stringResource(
+                if (completing) R.string.task_done_label else R.string.task_skip
+            )
             val alignment = if (completing) Alignment.CenterStart else Alignment.CenterEnd
             Box(
                 modifier = Modifier

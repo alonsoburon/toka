@@ -57,9 +57,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.toka.app.R
 import com.toka.app.data.api.CreateTemplateRequest
 import com.toka.app.ui.components.ReminderTimesField
 import com.toka.app.ui.components.normalizeReminders
@@ -94,6 +97,7 @@ fun CreateTemplateScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val createError = stringResource(R.string.create_error)
 
     val dayOptions = listOf(1, 3, 7, 14, 30, 90)
 
@@ -111,7 +115,7 @@ fun CreateTemplateScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Crear plantilla",
+                        text = stringResource(R.string.create_title),
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
                     )
@@ -120,7 +124,7 @@ fun CreateTemplateScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Volver",
+                            contentDescription = stringResource(R.string.common_back),
                             tint = TextPrimary
                         )
                     }
@@ -138,7 +142,7 @@ fun CreateTemplateScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
             Text(
-                text = "Nombre de la tarea",
+                text = stringResource(R.string.create_name_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary
             )
@@ -146,7 +150,7 @@ fun CreateTemplateScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = { Text("Nombre de la tarea") },
+                placeholder = { Text(stringResource(R.string.create_name_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -154,7 +158,7 @@ fun CreateTemplateScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Descripción (opcional)",
+                text = stringResource(R.string.create_description_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary
             )
@@ -162,7 +166,7 @@ fun CreateTemplateScreen(
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                placeholder = { Text("Descripción (opcional)") },
+                placeholder = { Text(stringResource(R.string.create_description_label)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
                 maxLines = 4
@@ -171,7 +175,7 @@ fun CreateTemplateScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Recordatorios (opcional)",
+                text = stringResource(R.string.create_reminders_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary
             )
@@ -184,7 +188,7 @@ fun CreateTemplateScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "Tipo",
+                text = stringResource(R.string.create_type_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary
             )
@@ -196,14 +200,14 @@ fun CreateTemplateScreen(
                     onClick = { isRecurring = false },
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                 ) {
-                    Text("Una sola vez")
+                    Text(stringResource(R.string.create_once))
                 }
                 SegmentedButton(
                     selected = isRecurring,
                     onClick = { isRecurring = true },
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                 ) {
-                    Text("Recurrente")
+                    Text(stringResource(R.string.create_recurring))
                 }
             }
 
@@ -211,7 +215,7 @@ fun CreateTemplateScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Cada cuántos días",
+                    text = stringResource(R.string.create_every_days),
                     style = MaterialTheme.typography.labelLarge,
                     color = TextPrimary
                 )
@@ -241,7 +245,7 @@ fun CreateTemplateScreen(
                             label = {
                                 Text(
                                     if (customDaysInput.isNotBlank()) customDaysInput
-                                    else "Personalizado"
+                                    else stringResource(R.string.create_custom)
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
@@ -256,7 +260,7 @@ fun CreateTemplateScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "Asignar a",
+                text = stringResource(R.string.create_assign_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextPrimary
             )
@@ -285,7 +289,7 @@ fun CreateTemplateScreen(
                                 .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Text(
-                                text = "Cualquiera",
+                                text = stringResource(R.string.common_anyone),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = if (selectedPersonId == null) Pink else TextSecondary
                             )
@@ -321,7 +325,7 @@ fun CreateTemplateScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "Avance",
+                text = stringResource(R.string.create_preview_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = TextMuted
             )
@@ -353,7 +357,7 @@ fun CreateTemplateScreen(
                         }
                         Column {
                             Text(
-                                text = name.ifEmpty { "Nombre de la tarea" },
+                                text = name.ifEmpty { stringResource(R.string.create_preview_name) },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = if (name.isNotBlank()) TextPrimary else TextMuted
                             )
@@ -362,9 +366,9 @@ fun CreateTemplateScreen(
                                     val days = if (customDaysInput.isNotBlank()) {
                                         customDaysInput.toIntOrNull() ?: selectedDays
                                     } else selectedDays
-                                    "Recurrente cada $days días"
+                                    pluralStringResource(R.plurals.create_preview_recurring, days, days)
                                 } else {
-                                    "Una sola vez"
+                                    stringResource(R.string.create_once)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
@@ -406,7 +410,7 @@ fun CreateTemplateScreen(
                             .onSuccess { onNavigateBack() }
                             .onFailure {
                                 isSubmitting = false
-                                snackbarHostState.showSnackbar(it.message ?: "Error al crear plantilla")
+                                snackbarHostState.showSnackbar(it.message ?: createError)
                             }
                     }
                 },
@@ -423,7 +427,7 @@ fun CreateTemplateScreen(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("Crear", fontSize = 16.sp)
+                    Text(stringResource(R.string.create_button), fontSize = 16.sp)
                 }
             }
 
@@ -435,12 +439,12 @@ fun CreateTemplateScreen(
         var dialogInput by remember { mutableStateOf(customDaysInput) }
         AlertDialog(
             onDismissRequest = { showCustomDialog = false },
-            title = { Text("Días personalizados") },
+            title = { Text(stringResource(R.string.create_custom_title)) },
             text = {
                 OutlinedTextField(
                     value = dialogInput,
                     onValueChange = { dialogInput = it.filter { c -> c.isDigit() } },
-                    label = { Text("Número de días") },
+                    label = { Text(stringResource(R.string.create_custom_days_label)) },
                     singleLine = true
                 )
             },
@@ -457,12 +461,12 @@ fun CreateTemplateScreen(
                     enabled = dialogInput.toIntOrNull()?.let { it > 0 } == true,
                     colors = ButtonDefaults.buttonColors(containerColor = Pink)
                 ) {
-                    Text("Aceptar")
+                    Text(stringResource(R.string.common_accept))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCustomDialog = false }) {
-                    Text("Cancelar")
+                    Text(stringResource(R.string.common_cancel))
                 }
             }
         )

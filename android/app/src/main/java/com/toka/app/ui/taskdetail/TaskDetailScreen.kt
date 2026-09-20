@@ -53,9 +53,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.toka.app.R
 import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.api.UpdateTemplateRequest
@@ -128,7 +131,7 @@ fun TaskDetailScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = task?.templateName ?: "Tarea",
+                        text = task?.templateName ?: stringResource(R.string.detail_fallback_title),
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
                     )
@@ -137,7 +140,7 @@ fun TaskDetailScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Volver",
+                            contentDescription = stringResource(R.string.common_back),
                             tint = TextPrimary
                         )
                     }
@@ -189,13 +192,16 @@ fun TaskDetailScreen(
 
                         Column {
                             Text(
-                                text = t.assignedToName ?: "Sin asignar",
+                                text = t.assignedToName ?: stringResource(R.string.detail_unassigned),
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
-                                text = t.assignedToName?.let { "Asignado" } ?: "Por asignar",
+                                text = stringResource(
+                                    if (t.assignedToName != null) R.string.detail_assigned
+                                    else R.string.detail_to_assign
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextMuted
                             )
@@ -205,7 +211,7 @@ fun TaskDetailScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Text(
-                        text = t.templateName ?: "Tarea",
+                        text = t.templateName ?: stringResource(R.string.detail_fallback_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
@@ -224,7 +230,7 @@ fun TaskDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Vencimiento",
+                                    text = stringResource(R.string.detail_due),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = TextMuted
                                 )
@@ -233,19 +239,30 @@ fun TaskDetailScreen(
                                     horizontalAlignment = Alignment.End
                                 ) {
                                     t.dueAt?.let { dueStr ->
-                                        val relativeText = try {
+                                        // El parseo va aparte: no se puede envolver en
+                                        // try/catch una llamada a stringResource.
+                                        val daysBetween = try {
                                             val dueInstant = Instant.parse(dueStr)
                                             val dueDate = LocalDate.ofInstant(dueInstant, ZoneId.systemDefault())
-                                            val today = LocalDate.now()
-                                            val daysBetween = ChronoUnit.DAYS.between(today, dueDate)
-                                            when {
-                                                daysBetween == 0L -> "Hoy"
-                                                daysBetween == 1L -> "Mañana"
-                                                daysBetween == -1L -> "Ayer"
-                                                daysBetween < 0 -> "Hace ${-daysBetween} días"
-                                                else -> "En $daysBetween días"
-                                            }
-                                        } catch (_: Exception) { "" }
+                                            ChronoUnit.DAYS.between(LocalDate.now(), dueDate)
+                                        } catch (_: Exception) { null }
+
+                                        val relativeText = when {
+                                            daysBetween == null -> ""
+                                            daysBetween == 0L -> stringResource(R.string.date_today)
+                                            daysBetween == 1L -> stringResource(R.string.date_tomorrow)
+                                            daysBetween == -1L -> stringResource(R.string.date_yesterday)
+                                            daysBetween < 0 -> pluralStringResource(
+                                                R.plurals.date_days_ago,
+                                                (-daysBetween).toInt(),
+                                                (-daysBetween).toInt()
+                                            )
+                                            else -> pluralStringResource(
+                                                R.plurals.date_in_days,
+                                                daysBetween.toInt(),
+                                                daysBetween.toInt()
+                                            )
+                                        }
 
                                         val absoluteText = try {
                                             val dueInstant = Instant.parse(dueStr)
@@ -266,12 +283,12 @@ fun TaskDetailScreen(
                                             color = TextMuted
                                         )
                                     } ?: Text(
-                                        text = "Sin fecha",
+                                        text = stringResource(R.string.date_none),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = TextMuted
                                     )
                                     TextButton(onClick = { showDatePicker = true }) {
-                                        Text("Cambiar fecha", color = Pink, fontSize = 12.sp)
+                                        Text(stringResource(R.string.date_change), color = Pink, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -284,7 +301,7 @@ fun TaskDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Asignado a",
+                                    text = stringResource(R.string.detail_assigned_to),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = TextMuted
                                 )
@@ -303,7 +320,7 @@ fun TaskDetailScreen(
                                     }
                                 } else {
                                     Text(
-                                        text = "Sin asignar",
+                                        text = stringResource(R.string.detail_unassigned),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = TextMuted
                                     )
@@ -313,7 +330,7 @@ fun TaskDetailScreen(
                             if (t.notes != null) {
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "Notas: ${t.notes}",
+                                    text = stringResource(R.string.detail_notes, t.notes),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
@@ -329,7 +346,7 @@ fun TaskDetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    text = "Recordatorios",
+                                    text = stringResource(R.string.reminders_title),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = TextMuted
                                 )
@@ -358,7 +375,7 @@ fun TaskDetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    text = "Asignar a",
+                                    text = stringResource(R.string.detail_assign_to),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = TextMuted
                                 )
@@ -396,7 +413,7 @@ fun TaskDetailScreen(
                                 .fillMaxWidth()
                                 .height(50.dp)
                         ) {
-                            Text("✓ Completar", fontSize = 16.sp, color = Color.White)
+                            Text(stringResource(R.string.detail_complete), fontSize = 16.sp, color = Color.White)
                         }
                     }
 
@@ -410,7 +427,7 @@ fun TaskDetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    text = "✓ Completada",
+                                    text = stringResource(R.string.detail_completed),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = CompleteGreen
@@ -430,7 +447,7 @@ fun TaskDetailScreen(
                                 }
                                 t.completedByName?.let { name ->
                                     Text(
-                                        text = "Por $name",
+                                        text = stringResource(R.string.detail_completed_by, name),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted
                                     )
@@ -447,7 +464,7 @@ fun TaskDetailScreen(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Tarea no encontrada", color = TextMuted)
+                    Text(stringResource(R.string.detail_not_found), color = TextMuted)
                 }
             }
         }
@@ -456,15 +473,15 @@ fun TaskDetailScreen(
     if (showCompleteDialog) {
         AlertDialog(
             onDismissRequest = { showCompleteDialog = false },
-            title = { Text("Completar tarea") },
+            title = { Text(stringResource(R.string.detail_complete_title)) },
             text = {
                 Column {
-                    Text("¿Quieres añadir alguna nota?")
+                    Text(stringResource(R.string.detail_complete_prompt))
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = completeNotes,
                         onValueChange = { completeNotes = it },
-                        label = { Text("Notas") },
+                        label = { Text(stringResource(R.string.detail_notes_label)) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2
                     )
@@ -488,12 +505,12 @@ fun TaskDetailScreen(
                         }
                     }
                 ) {
-                    Text("Completar", color = CompleteGreen)
+                    Text(stringResource(R.string.task_complete), color = CompleteGreen)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCompleteDialog = false }) {
-                    Text("Cancelar")
+                    Text(stringResource(R.string.common_cancel))
                 }
             }
         )
@@ -522,10 +539,12 @@ fun TaskDetailScreen(
                         }
                     }
                     showDatePicker = false
-                }) { Text("OK") }
+                }) { Text(stringResource(R.string.common_ok)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancelar") }
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         ) {
             DatePicker(state = datePickerState)

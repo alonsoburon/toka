@@ -34,9 +34,9 @@ object Notifications {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Recordatorios",
+            context.getString(R.string.notif_channel_name),
             NotificationManager.IMPORTANCE_DEFAULT
-        ).apply { description = "Tareas que debes hacer hoy" }
+        ).apply { description = context.getString(R.string.notif_channel_description) }
         manager.createNotificationChannel(channel)
     }
 
@@ -91,12 +91,12 @@ object Notifications {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(candidate.name)
-            .setContentText("Pendiente · aviso de las $time")
+            .setContentText(context.getString(R.string.notif_text, time))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(pending)
-            .addAction(0, "✓ Completar", completePending)
-            .addAction(0, "Saltar", skipPending)
+            .addAction(0, context.getString(R.string.notif_complete_action), completePending)
+            .addAction(0, context.getString(R.string.notif_skip_action), skipPending)
             .build()
 
         try {

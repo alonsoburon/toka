@@ -24,7 +24,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.toka.app.R
 import com.toka.app.ui.theme.TextMuted
 
 /**
@@ -61,13 +63,16 @@ fun ReminderTimesField(
                     },
                     label = { Text(time) },
                     trailingIcon = {
-                        Icon(Icons.Default.Close, contentDescription = "Quitar $time")
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = stringResource(R.string.reminders_remove, time)
+                        )
                     }
                 )
             }
             AssistChip(
                 onClick = { showPicker = true },
-                label = { Text("Añadir hora") },
+                label = { Text(stringResource(R.string.reminders_add_hour)) },
                 leadingIcon = {
                     Icon(Icons.Default.Add, contentDescription = null)
                 }
@@ -75,7 +80,7 @@ fun ReminderTimesField(
         }
         if (times.isEmpty()) {
             Text(
-                text = "Sin avisos",
+                text = stringResource(R.string.reminders_none),
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted,
                 modifier = Modifier.padding(top = 6.dp)
@@ -86,7 +91,7 @@ fun ReminderTimesField(
     if (showPicker) {
         AlertDialog(
             onDismissRequest = { showPicker = false },
-            title = { Text("Añadir recordatorio") },
+            title = { Text(stringResource(R.string.reminders_add_title)) },
             text = {
                 TimeInput(state = pickerState)
             },
@@ -96,10 +101,12 @@ fun ReminderTimesField(
                     val updated = (times + hhmm).distinct().sorted()
                     onValueChange(updated.joinToString(",").ifBlank { null })
                     showPicker = false
-                }) { Text("Añadir") }
+                }) { Text(stringResource(R.string.common_add)) }
             },
             dismissButton = {
-                TextButton(onClick = { showPicker = false }) { Text("Cancelar") }
+                TextButton(onClick = { showPicker = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }
