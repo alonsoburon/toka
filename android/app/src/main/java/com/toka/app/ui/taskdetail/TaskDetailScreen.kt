@@ -2,6 +2,7 @@ package com.toka.app.ui.taskdetail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -21,8 +23,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -93,6 +101,7 @@ fun TaskDetailScreen(
     var showCompleteDialog by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var reminderTimes by remember { mutableStateOf<String?>(null) }
+    var templateRecurrence by remember { mutableStateOf<Int?>(null) }
     var completeNotes by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     var people by remember { mutableStateOf<List<PersonDTO>>(emptyList()) }
@@ -109,10 +118,26 @@ fun TaskDetailScreen(
                     isLoading = false
                     it.templateId?.let { tid ->
                         AppContainer.instance.taskRepository.getTemplate(tid)
-                            .onSuccess { tpl -> reminderTimes = tpl.reminderTimes }
+                            .onSuccess { tpl ->
+                                reminderTimes = tpl.reminderTimes
+                                templateRecurrence = tpl.recurrenceDays
+                            }
                     }
                 }
                 .onFailure { error = it.message; isLoading = false }
+        }
+    }
+
+    /** Reprograma a "hoy + n días" desde los chips rápidos. */
+    fun reschedule(daysFromNow: Long) {
+        val target = LocalDate.now().plusDays(daysFromNow)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toString()
+        scope.launch {
+            AppContainer.instance.taskRepository.updateTask(taskId, dueAt = target)
+                .onSuccess { loadTask() }
+                .onFailure { error = it.message }
         }
     }
 
@@ -127,6 +152,7 @@ fun TaskDetailScreen(
 
     Scaffold(
         containerColor = SurfaceBg,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -145,7 +171,8 @@ fun TaskDetailScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg),
+                windowInsets = WindowInsets(0, 0, 0, 0)
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -293,6 +320,32 @@ fun TaskDetailScreen(
                                 }
                             }
 
+                            if (t.status == "pending") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AssistChip(
+                                        onClick = { reschedule(0) },
+                                        label = { Text(stringResource(R.string.date_today)) }
+                                    )
+                                    AssistChip(
+                                        onClick = { reschedule(1) },
+                                        label = { Text(stringResource(R.string.date_tomorrow)) }
+                                    )
+                                    AssistChip(
+                                        onClick = { reschedule(3) },
+                                        label = { Text(stringResource(R.string.reschedule_plus3)) }
+                                    )
+                                    AssistChip(
+                                        onClick = { reschedule(7) },
+                                        label = { Text(stringResource(R.string.reschedule_plus7)) }
+                                    )
+                                }
+                            }
+
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Row(
@@ -367,6 +420,81 @@ fun TaskDetailScreen(
                         }
                     }
 
+                    if (t.templateId != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = CardBg),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = stringResource(R.string.detail_recurrence),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = TextMuted
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                val isRecurring = templateRecurrence != null
+                                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                    SegmentedButton(
+                                        selected = !isRecurring,
+                                        onClick = {
+                                            templateRecurrence = null
+                                            scope.launch {
+                                                AppContainer.instance.taskRepository
+                                                    .setTemplateRecurrence(t.templateId, null)
+                                                    .onFailure { error = it.message }
+                                            }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                                    ) { Text(stringResource(R.string.create_once)) }
+                                    SegmentedButton(
+                                        selected = isRecurring,
+                                        onClick = {
+                                            val days = templateRecurrence ?: 7
+                                            templateRecurrence = days
+                                            scope.launch {
+                                                AppContainer.instance.taskRepository
+                                                    .setTemplateRecurrence(t.templateId, days)
+                                                    .onFailure { error = it.message }
+                                            }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                                    ) { Text(stringResource(R.string.create_recurring)) }
+                                }
+
+                                if (isRecurring) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf(1, 3, 7, 14, 30, 90).forEach { days ->
+                                            FilterChip(
+                                                selected = templateRecurrence == days,
+                                                onClick = {
+                                                    templateRecurrence = days
+                                                    scope.launch {
+                                                        AppContainer.instance.taskRepository
+                                                            .setTemplateRecurrence(t.templateId, days)
+                                                            .onFailure { error = it.message }
+                                                    }
+                                                },
+                                                label = { Text("$days") },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = Pink.copy(alpha = 0.15f),
+                                                    selectedLabelColor = Pink
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (t.status == "pending" && people.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Card(
@@ -405,15 +533,39 @@ fun TaskDetailScreen(
                     if (t.status == "pending") {
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        Button(
-                            onClick = { showCompleteDialog = true },
-                            enabled = !isSubmitting,
-                            colors = ButtonDefaults.buttonColors(containerColor = CompleteGreen),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(stringResource(R.string.detail_complete), fontSize = 16.sp, color = Color.White)
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        AppContainer.instance.taskRepository.skipTask(taskId)
+                                            .onSuccess { loadTask() }
+                                            .onFailure { error = it.message }
+                                    }
+                                },
+                                enabled = !isSubmitting,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
+                            ) {
+                                Text(stringResource(R.string.task_skip), color = SkipRed)
+                            }
+                            Button(
+                                onClick = { showCompleteDialog = true },
+                                enabled = !isSubmitting,
+                                colors = ButtonDefaults.buttonColors(containerColor = CompleteGreen),
+                                modifier = Modifier
+                                    .weight(2f)
+                                    .height(50.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.detail_complete),
+                                    fontSize = 16.sp,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
 

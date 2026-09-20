@@ -205,6 +205,12 @@ data class CreateTemplateRequest(
 )
 
 @Serializable
+data class SetRecurrenceRequest(
+    @SerialName("recurrence_days")
+    val recurrenceDays: Int? = null
+)
+
+@Serializable
 data class UpdateTemplateRequest(
     val name: String? = null,
     val description: String? = null,

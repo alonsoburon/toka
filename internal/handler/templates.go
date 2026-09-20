@@ -232,6 +232,70 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(template)
 }
 
+// SetTemplateRecurrence cambia solo la recurrencia, y a diferencia de UpdateTemplate
+// sí puede volver a "una sola vez" (recurrence_days = NULL). Va aparte porque
+// UpdateTemplate usa COALESCE y un null significa "no tocar".
+func (s *Server) SetTemplateRecurrence(w http.ResponseWriter, r *http.Request) {
+	editor, hid, ok := auth.RequireAuth(w, r)
+	if !ok {
+		return
+	}
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		RecurrenceDays *int `json:"recurrence_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	var days *int
+	if req.RecurrenceDays != nil && *req.RecurrenceDays > 0 {
+		days = req.RecurrenceDays
+	}
+
+	tx, err := s.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	rowVersion, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	tag, err := tx.ExecContext(r.Context(), `
+		UPDATE task_templates
+		SET recurrence_days = ?, updated_by = ?, updated_at = ?, row_version = ?
+		WHERE id = ? AND household_id = ?
+	`, days, editor.ID, time.Now().UTC(), rowVersion, id, hid)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if n, _ := tag.RowsAffected(); n == 0 {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"id": id, "recurrence_days": days})
+}
+
 func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	editor, hid, ok := auth.RequireAuth(w, r)
 	if !ok {

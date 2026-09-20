@@ -198,6 +198,7 @@ Fuente de verdad: `internal/server/server.go`.
 | GET | `/templates` | Bearer | `ListTemplates` (solo `is_active`) |
 | POST | `/templates` | Bearer | `CreateTemplate` + primera instancia |
 | PATCH | `/templates/{id}` | Bearer | `UpdateTemplate` |
+| POST | `/templates/{id}/recurrence` | Bearer | `SetTemplateRecurrence` — fija o borra la recurrencia (`null` = una sola vez) |
 | DELETE | `/templates/{id}` | Bearer | `DeleteTemplate` (soft: `is_active=false`) |
 | GET | `/tasks` | Bearer | `ListPendingTasks` (atrasadas primero) |
 | GET | `/tasks/history?days=30` | Bearer | `ListTaskHistory` |

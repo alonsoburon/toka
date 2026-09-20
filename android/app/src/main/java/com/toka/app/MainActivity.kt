@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +38,9 @@ class MainActivity : ComponentActivity() {
     private val pendingTaskId = mutableStateOf<Long?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge-to-edge explícito: en Android 15 (targetSdk 35) ya es obligatorio, y así
+        // los iconos de las barras se ajustan solos al modo claro/oscuro.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         pendingTaskId.value = intent
             .getLongExtra(com.toka.app.notifications.Notifications.EXTRA_TASK_ID, -1L)

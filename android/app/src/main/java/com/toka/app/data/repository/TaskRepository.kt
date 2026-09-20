@@ -246,6 +246,24 @@ class TaskRepository(
             updated.toDto()
         }
 
+    /**
+     * Cambia la recurrencia de una plantilla, incluida la vuelta a "una sola vez".
+     * Va por `template.set_recurrence` y no por `template.update` porque allí un null
+     * significa "no tocar" y no se podría borrar la recurrencia.
+     */
+    suspend fun setTemplateRecurrence(templateId: Long, recurrenceDays: Int?): Result<Unit> =
+        runCatching {
+            val row = dao.activeTemplatesOnce().firstOrNull { it.id == templateId }
+                ?: error("template $templateId not found")
+            dao.upsertTemplate(row.copy(recurrenceDays = recurrenceDays, pending = true))
+
+            sync.enqueue("template.set_recurrence", buildJsonObject {
+                put("id", JsonPrimitive(templateId))
+                put("recurrence_days", recurrenceDays?.let { JsonPrimitive(it) } ?: JsonNull)
+            })
+            SyncWorker.syncNow(appContext)
+        }
+
     suspend fun deleteTemplate(id: Long): Result<Unit> = runCatching {
         dao.deleteTemplate(id)
         sync.enqueue("template.delete", buildJsonObject { put("id", JsonPrimitive(id)) })

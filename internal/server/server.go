@@ -31,6 +31,7 @@ func New(database *sql.DB) http.Handler {
 	mux.Handle("GET /templates", authMw(http.HandlerFunc(s.ListTemplates)))
 	mux.Handle("POST /templates", authMw(http.HandlerFunc(s.CreateTemplate)))
 	mux.Handle("PATCH /templates/{id}", authMw(http.HandlerFunc(s.UpdateTemplate)))
+	mux.Handle("POST /templates/{id}/recurrence", authMw(http.HandlerFunc(s.SetTemplateRecurrence)))
 	mux.Handle("DELETE /templates/{id}", authMw(http.HandlerFunc(s.DeleteTemplate)))
 
 	mux.Handle("GET /tasks", authMw(http.HandlerFunc(s.ListPendingTasks)))

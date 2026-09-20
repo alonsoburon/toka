@@ -51,6 +51,14 @@ class TemplatesViewModel(
         }
     }
 
+    fun setRecurrence(id: Long, recurrenceDays: Int?) {
+        viewModelScope.launch {
+            taskRepository.setTemplateRecurrence(id, recurrenceDays).onFailure { e ->
+                _uiState.update { it.copy(error = e.message ?: "No se pudo actualizar") }
+            }
+        }
+    }
+
     fun delete(id: Long) {
         viewModelScope.launch {
             taskRepository.deleteTemplate(id).onFailure { e ->

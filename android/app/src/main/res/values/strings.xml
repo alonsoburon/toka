@@ -69,6 +69,10 @@
     <string name="detail_to_assign">Por asignar</string>
     <string name="detail_assign_to">Asignar a</string>
     <string name="detail_notes">Notas: %1$s</string>
+    <string name="detail_recurrence">Repetición</string>
+    <string name="detail_reschedule">Reprogramar</string>
+    <string name="reschedule_plus3">+3 días</string>
+    <string name="reschedule_plus7">+1 semana</string>
     <string name="detail_complete">✓ Completar</string>
     <string name="detail_completed">✓ Completada</string>
     <string name="detail_completed_by">Por %1$s</string>

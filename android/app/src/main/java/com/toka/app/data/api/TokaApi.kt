@@ -97,6 +97,13 @@ interface TokaApi {
         @Header("Authorization") token: String
     ): TemplateDTO
 
+    @POST("templates/{id}/recurrence")
+    suspend fun setTemplateRecurrence(
+        @Path("id") id: Long,
+        @Body request: SetRecurrenceRequest,
+        @Header("Authorization") token: String
+    ): GenericResponse
+
     @DELETE("templates/{id}")
     suspend fun deleteTemplate(
         @Path("id") id: Long,

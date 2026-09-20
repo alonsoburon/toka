@@ -48,10 +48,12 @@ fun SettingsScreen(onLogout: () -> Unit) {
 
     Scaffold(
         containerColor = SurfaceBg,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold, color = TextPrimary) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg),
+                windowInsets = WindowInsets(0, 0, 0, 0)
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }

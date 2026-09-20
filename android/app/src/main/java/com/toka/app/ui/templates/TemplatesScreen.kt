@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -97,10 +98,12 @@ fun TemplatesScreen(
 
     Scaffold(
         containerColor = SurfaceBg,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.templates_title), fontWeight = FontWeight.Bold, color = TextPrimary) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg),
+                windowInsets = WindowInsets(0, 0, 0, 0)
             )
         },
         floatingActionButton = {
@@ -146,8 +149,11 @@ fun TemplatesScreen(
             template = template,
             people = uiState.people,
             onDismiss = { editing = null },
-            onSave = { request ->
+            onSave = { request, days ->
                 viewModel.update(template.id, request)
+                if (days != template.recurrenceDays) {
+                    viewModel.setRecurrence(template.id, days)
+                }
                 editing = null
             }
         )
@@ -246,7 +252,7 @@ private fun EditTemplateDialog(
     template: TemplateDTO,
     people: List<PersonDTO>,
     onDismiss: () -> Unit,
-    onSave: (UpdateTemplateRequest) -> Unit
+    onSave: (UpdateTemplateRequest, Int?) -> Unit
 ) {
     var name by remember { mutableStateOf(template.name) }
     var description by remember { mutableStateOf(template.description ?: "") }
@@ -255,10 +261,9 @@ private fun EditTemplateDialog(
         mutableStateOf(template.reminderTimes?.takeIf { it.isNotBlank() })
     }
 
-    // Una plantilla de una sola vez puede convertirse en recurrente; al revés no, porque
-    // el backend no distingue "no tocar" de "borrar" en recurrence_days.
-    val wasOneShot = template.recurrenceDays == null
-    var makeRecurring by remember { mutableStateOf(!wasOneShot) }
+    // La recurrencia va por su propia operación (permite volver a "una sola vez"),
+    // así que se guarda aparte del resto de los campos.
+    var makeRecurring by remember { mutableStateOf(template.recurrenceDays != null) }
     var daysText by remember {
         mutableStateOf(template.recurrenceDays?.toString() ?: "7")
     }
@@ -295,21 +300,19 @@ private fun EditTemplateDialog(
 
                 Spacer(Modifier.height(12.dp))
 
-                if (wasOneShot) {
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = !makeRecurring,
-                            onClick = { makeRecurring = false },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                        ) { Text(stringResource(R.string.create_once)) }
-                        SegmentedButton(
-                            selected = makeRecurring,
-                            onClick = { makeRecurring = true },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                        ) { Text(stringResource(R.string.create_recurring)) }
-                    }
-                    Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !makeRecurring,
+                        onClick = { makeRecurring = false },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                    ) { Text(stringResource(R.string.create_once)) }
+                    SegmentedButton(
+                        selected = makeRecurring,
+                        onClick = { makeRecurring = true },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                    ) { Text(stringResource(R.string.create_recurring)) }
                 }
+                Spacer(Modifier.height(8.dp))
 
                 if (makeRecurring) {
                     OutlinedTextField(
@@ -359,10 +362,10 @@ private fun EditTemplateDialog(
                         UpdateTemplateRequest(
                             name = name.ifBlank { null },
                             description = description,
-                            recurrenceDays = days,
                             preferredAssigneeId = selectedPersonId,
                             reminderTimes = reminder ?: ""
-                        )
+                        ),
+                        days
                     )
                 },
                 enabled = name.isNotBlank() && validRecurrence,

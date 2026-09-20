@@ -455,6 +455,38 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		}
 		return http.StatusOK, map[string]any{"id": p.ID}, nil
 
+	case "template.set_recurrence":
+		// Operación aparte de template.update a propósito: allí recurrence_days usa
+		// COALESCE (null = no tocar), así que no había forma de volver a "una sola
+		// vez". Aquí null borra la recurrencia de verdad.
+		var p struct {
+			ID             int64 `json:"id"`
+			RecurrenceDays *int  `json:"recurrence_days"`
+		}
+		if err := json.Unmarshal(m.Payload, &p); err != nil {
+			return http.StatusBadRequest, errBody("invalid payload"), nil
+		}
+		var days *int
+		if p.RecurrenceDays != nil && *p.RecurrenceDays > 0 {
+			days = p.RecurrenceDays
+		}
+		rowVersion, err := db.NextRowVersion(ctx, tx)
+		if err != nil {
+			return 0, nil, err
+		}
+		tag, err := tx.ExecContext(ctx, `
+			UPDATE task_templates
+			SET recurrence_days = ?, updated_by = ?, updated_at = ?, row_version = ?
+			WHERE id = ? AND household_id = ?
+		`, days, person.ID, time.Now().UTC(), rowVersion, p.ID, hid)
+		if err != nil {
+			return 0, nil, err
+		}
+		if n, _ := tag.RowsAffected(); n == 0 {
+			return http.StatusNotFound, errBody("template not found"), nil
+		}
+		return http.StatusOK, map[string]any{"id": p.ID, "recurrence_days": days}, nil
+
 	case "template.delete":
 		var p struct {
 			ID int64 `json:"id"`

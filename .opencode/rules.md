@@ -67,6 +67,7 @@ Fuente de verdad: `internal/server/server.go`.
 | GET | `/templates` | Bearer | List active templates |
 | POST | `/templates` | Bearer | Create template + first instance |
 | PATCH | `/templates/{id}` | Bearer | Update template |
+| POST | `/templates/{id}/recurrence` | Bearer | Set/clear recurrence (`null` = one-shot) |
 | DELETE | `/templates/{id}` | Bearer | Soft-delete (`is_active=false`) |
 | GET | `/tasks` | Bearer | Pending tasks (overdue first) |
 | GET | `/tasks/history?days=30` | Bearer | Done + skipped tasks |
