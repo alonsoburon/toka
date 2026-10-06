@@ -12,7 +12,7 @@ import (
 // memoria: para dos personas alcanza y no suma dependencias.
 //
 //   - token bucket por IP (rate sostenido, ráfaga)
-//   - tope de peticiones concurrentes (la e2-micro tiene 1 vCPU)
+//   - tope de peticiones concurrentes (SQLite tiene un solo escritor)
 //   - tope de tamaño del body
 //
 // El servidor corre detrás de Caddy. Caddy añade la IP real al FINAL de

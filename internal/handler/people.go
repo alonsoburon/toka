@@ -80,6 +80,10 @@ func (s *Server) CreatePerson(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
 		return
 	}
+	if tooLong(req.Name, maxNameLen) || tooLong(req.Color, maxColorLen) || tooLong(req.Emoji, maxEmojiLen) {
+		http.Error(w, `{"error":"name, color or emoji too long"}`, http.StatusBadRequest)
+		return
+	}
 	if req.Color == "" {
 		req.Color = "#a78bfa"
 	}
@@ -156,6 +160,10 @@ func (s *Server) UpdatePerson(w http.ResponseWriter, r *http.Request) {
 	var req UpdatePersonRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if tooLongPtr(req.Name, maxNameLen) || tooLongPtr(req.Color, maxColorLen) || tooLongPtr(req.Emoji, maxEmojiLen) {
+		http.Error(w, `{"error":"name, color or emoji too long"}`, http.StatusBadRequest)
 		return
 	}
 

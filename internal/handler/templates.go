@@ -84,6 +84,10 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
 		return
 	}
+	if msg := validateTemplateFields(&req.Name, &req.Description, req.RecurrenceDays, req.ReminderTimes); msg != "" {
+		http.Error(w, `{"error":"`+msg+`"}`, http.StatusBadRequest)
+		return
+	}
 
 	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -91,6 +95,14 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	if ok, err := personInHousehold(r.Context(), tx, hid, req.PreferredAssigneeID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, `{"error":"preferred_assignee_id is not in your household"}`, http.StatusBadRequest)
+		return
+	}
 
 	templateVersion, err := db.NextRowVersion(r.Context(), tx)
 	if err != nil {
@@ -176,12 +188,25 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := validateTemplateFields(req.Name, req.Description, req.RecurrenceDays, req.ReminderTimes); msg != "" {
+		http.Error(w, `{"error":"`+msg+`"}`, http.StatusBadRequest)
+		return
+	}
+
 	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
+
+	if ok, err := personInHousehold(r.Context(), tx, hid, req.PreferredAssigneeID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, `{"error":"preferred_assignee_id is not in your household"}`, http.StatusBadRequest)
+		return
+	}
 
 	rowVersion, err := db.NextRowVersion(r.Context(), tx)
 	if err != nil {
@@ -223,6 +248,13 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !template.IsActive {
+		if err := retirePendingInstances(r.Context(), tx, hid, id, rowVersion); err != nil {
+			http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
@@ -255,6 +287,10 @@ func (s *Server) SetTemplateRecurrence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.RecurrenceDays != nil && *req.RecurrenceDays > maxRecurrenceDays {
+		http.Error(w, `{"error":"recurrence_days out of range"}`, http.StatusBadRequest)
+		return
+	}
 	var days *int
 	if req.RecurrenceDays != nil && *req.RecurrenceDays > 0 {
 		days = req.RecurrenceDays
@@ -336,10 +372,31 @@ func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := retirePendingInstances(r.Context(), tx, hid, id, rowVersion); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"commit failed"}`, http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// validateTemplateFields devuelve un mensaje de error (vacío si todo está bien). Los
+// punteros son opcionales: nil significa "no viene", y se acepta.
+func validateTemplateFields(name, description *string, recurrenceDays *int, reminderTimes *string) string {
+	switch {
+	case tooLongPtr(name, maxNameLen):
+		return "name too long"
+	case tooLongPtr(description, maxTextLen):
+		return "description too long"
+	case !validRecurrence(recurrenceDays):
+		return "recurrence_days out of range"
+	case tooLongPtr(reminderTimes, maxNameLen):
+		return "reminder_times too long"
+	}
+	return ""
 }

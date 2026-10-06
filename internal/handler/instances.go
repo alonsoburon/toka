@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -34,8 +35,8 @@ func (s *Server) ListPendingTasks(w http.ResponseWriter, r *http.Request) {
 		       pa.name, pa.color, pa.avatar_emoji
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
-		LEFT JOIN people pa ON pa.id = ti.assigned_to_id
-		WHERE ti.household_id = ? AND ti.status = 'pending'
+		LEFT JOIN people pa ON pa.id = ti.assigned_to_id AND pa.household_id = ti.household_id
+		WHERE ti.household_id = ? AND ti.status = 'pending' AND tt.is_active = true
 		ORDER BY
 			CASE WHEN ti.due_at < ? THEN 0 ELSE 1 END,
 			ti.due_at ASC
@@ -98,7 +99,7 @@ func (s *Server) ListTaskHistory(w http.ResponseWriter, r *http.Request) {
 		       pc.name, pc.color, pc.avatar_emoji
 		FROM task_instances ti
 		JOIN task_templates tt ON tt.id = ti.template_id
-		LEFT JOIN people pc ON pc.id = ti.completed_by_id
+		LEFT JOIN people pc ON pc.id = ti.completed_by_id AND pc.household_id = ti.household_id
 		WHERE ti.household_id = ? AND ti.status IN ('done', 'skipped')
 		  AND ti.completed_at > ?
 		ORDER BY ti.completed_at DESC
@@ -130,27 +131,31 @@ func (s *Server) ListTaskHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(tasks)
 }
 
+// createNextInstance genera la siguiente instancia de una tarea recurrente recién
+// resuelta. Devuelve nil si no corresponde generar nada (plantilla one-shot o dada de
+// baja). Un error de base de datos se propaga: antes se tragaba y el completado quedaba
+// confirmado sin su siguiente instancia, así que la tarea desaparecía para siempre.
 func (s *Server) createNextInstance(ctx context.Context, tx *sql.Tx, instanceID, personID int64, now time.Time) (*time.Time, error) {
-	var recurrenceDays *int
+	var (
+		templateID, householdID int64
+		recurrenceDays          *int
+		preferredAssigneeID     *int64
+		isActive                bool
+	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT tt.recurrence_days
+		SELECT ti.template_id, ti.household_id, tt.recurrence_days,
+		       tt.preferred_assignee_id, tt.is_active
 		FROM task_instances ti
-		JOIN task_templates tt ON tt.id = ti.template_id
+		JOIN task_templates tt ON tt.id = ti.template_id AND tt.household_id = ti.household_id
 		WHERE ti.id = ?
-	`, instanceID).Scan(&recurrenceDays)
-	if err != nil || recurrenceDays == nil {
+	`, instanceID).Scan(&templateID, &householdID, &recurrenceDays, &preferredAssigneeID, &isActive)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-
-	var templateID, householdID int64
-	var preferredAssigneeID *int64
-	err = tx.QueryRowContext(ctx, `
-		SELECT ti.template_id, ti.household_id, tt.preferred_assignee_id
-		FROM task_instances ti
-		JOIN task_templates tt ON tt.id = ti.template_id
-		WHERE ti.id = ?
-	`, instanceID).Scan(&templateID, &householdID, &preferredAssigneeID)
 	if err != nil {
+		return nil, err
+	}
+	if recurrenceDays == nil || !isActive {
 		return nil, nil
 	}
 
@@ -191,6 +196,10 @@ func (s *Server) CompleteTask(w http.ResponseWriter, r *http.Request) {
 
 	var req CompleteTaskRequest
 	json.NewDecoder(r.Body).Decode(&req)
+	if tooLongPtr(req.Notes, maxTextLen) {
+		http.Error(w, `{"error":"notes too long"}`, http.StatusBadRequest)
+		return
+	}
 
 	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -353,12 +362,25 @@ func (s *Server) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		dueAt = &parsed
 	}
 
+	if tooLongPtr(req.Notes, maxTextLen) {
+		http.Error(w, `{"error":"notes too long"}`, http.StatusBadRequest)
+		return
+	}
+
 	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
+
+	if ok, err := personInHousehold(r.Context(), tx, hid, req.AssignedToID); err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, `{"error":"assigned_to_id is not in your household"}`, http.StatusBadRequest)
+		return
+	}
 
 	rowVersion, err := db.NextRowVersion(r.Context(), tx)
 	if err != nil {

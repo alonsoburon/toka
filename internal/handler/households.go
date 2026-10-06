@@ -13,6 +13,10 @@ import (
 
 type Server struct {
 	DB *sql.DB
+
+	// MaxHouseholds acota cuántos hogares puede haber (0 = sin límite).
+	// POST /households no pide auth, así que sin tope cualquiera puede llenar el disco.
+	MaxHouseholds int
 }
 
 type CreateHouseholdRequest struct {
@@ -50,6 +54,11 @@ func (s *Server) CreateHousehold(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"admin_name required"}`, http.StatusBadRequest)
 		return
 	}
+	if tooLong(req.Name, maxNameLen) || tooLong(req.AdminName, maxNameLen) ||
+		tooLong(req.AdminColor, maxColorLen) || tooLong(req.AdminEmoji, maxEmojiLen) {
+		http.Error(w, `{"error":"name, color or emoji too long"}`, http.StatusBadRequest)
+		return
+	}
 	if req.AdminColor == "" {
 		req.AdminColor = "#a78bfa"
 	}
@@ -66,6 +75,18 @@ func (s *Server) CreateHousehold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	if s.MaxHouseholds > 0 {
+		var n int
+		if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM households`).Scan(&n); err != nil {
+			http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+			return
+		}
+		if n >= s.MaxHouseholds {
+			http.Error(w, `{"error":"household limit reached"}`, http.StatusForbidden)
+			return
+		}
+	}
 
 	var householdID int64
 	err = tx.QueryRowContext(r.Context(), `
@@ -145,6 +166,10 @@ func (s *Server) JoinHousehold(w http.ResponseWriter, r *http.Request) {
 
 	if req.InviteCode == "" || req.Name == "" {
 		http.Error(w, `{"error":"invite_code and name required"}`, http.StatusBadRequest)
+		return
+	}
+	if tooLong(req.Name, maxNameLen) || tooLong(req.Color, maxColorLen) || tooLong(req.Emoji, maxEmojiLen) {
+		http.Error(w, `{"error":"name, color or emoji too long"}`, http.StatusBadRequest)
 		return
 	}
 	if req.Color == "" {

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 // NextRowVersion incrementa el contador global y devuelve el nuevo valor.
@@ -17,4 +18,16 @@ func NextRowVersion(ctx context.Context, tx *sql.Tx) (int64, error) {
 		UPDATE sync_counter SET value = value + 1 RETURNING value
 	`).Scan(&v)
 	return v, err
+}
+
+// PruneMutations borra de sync_mutations los registros más viejos que olderThan. La tabla
+// guarda la respuesta completa de cada escritura offline para poder deduplicar
+// reenvíos, pero un reenvío llega en horas o días, no meses: sin poda crece para siempre.
+func PruneMutations(ctx context.Context, database *sql.DB, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan)
+	res, err := database.ExecContext(ctx, `DELETE FROM sync_mutations WHERE applied_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

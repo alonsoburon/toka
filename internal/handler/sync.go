@@ -310,8 +310,8 @@ func (s *Server) applyOne(ctx context.Context, person auth.Person, hid int64, m 
 	var prevStatus int
 	var prevBody []byte
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, response FROM sync_mutations WHERE mutation_id = ?
-	`, m.MutationID).Scan(&prevStatus, &prevBody)
+		SELECT status, response FROM sync_mutations WHERE mutation_id = ? AND household_id = ?
+	`, m.MutationID, hid).Scan(&prevStatus, &prevBody)
 	if err == nil {
 		return MutationResult{
 			MutationID: m.MutationID,
@@ -369,6 +369,14 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		if p.Name == "" || p.ClientID == "" {
 			return http.StatusBadRequest, errBody("name and client_id required"), nil
 		}
+		if msg := validateTemplateFields(&p.Name, &p.Description, p.RecurrenceDays, p.ReminderTimes); msg != "" {
+			return http.StatusBadRequest, errBody(msg), nil
+		}
+		if ok, err := personInHousehold(ctx, tx, hid, p.PreferredAssigneeID); err != nil {
+			return 0, nil, err
+		} else if !ok {
+			return http.StatusBadRequest, errBody("preferred_assignee_id is not in your household"), nil
+		}
 
 		rowVersion, err := db.NextRowVersion(ctx, tx)
 		if err != nil {
@@ -418,6 +426,7 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 	case "template.update":
 		var p struct {
 			ID                  int64   `json:"id"`
+			ClientID            string  `json:"client_id"`
 			Name                *string `json:"name"`
 			Description         *string `json:"description"`
 			RecurrenceDays      *int    `json:"recurrence_days"`
@@ -428,6 +437,22 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
 		}
+		if msg := validateTemplateFields(p.Name, p.Description, p.RecurrenceDays, p.ReminderTimes); msg != "" {
+			return http.StatusBadRequest, errBody(msg), nil
+		}
+		if ok, err := personInHousehold(ctx, tx, hid, p.PreferredAssigneeID); err != nil {
+			return 0, nil, err
+		} else if !ok {
+			return http.StatusBadRequest, errBody("preferred_assignee_id is not in your household"), nil
+		}
+		tplID, found, err := resolveTemplateID(ctx, tx, hid, p.ID, p.ClientID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !found {
+			return http.StatusNotFound, errBody("template not found"), nil
+		}
+		p.ID = tplID
 		rowVersion, err := db.NextRowVersion(ctx, tx)
 		if err != nil {
 			return 0, nil, err
@@ -453,6 +478,11 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		if n, _ := tag.RowsAffected(); n == 0 {
 			return http.StatusNotFound, errBody("template not found"), nil
 		}
+		if p.IsActive != nil && !*p.IsActive {
+			if err := retirePendingInstances(ctx, tx, hid, p.ID, rowVersion); err != nil {
+				return 0, nil, err
+			}
+		}
 		return http.StatusOK, map[string]any{"id": p.ID}, nil
 
 	case "template.set_recurrence":
@@ -460,12 +490,24 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		// COALESCE (null = no tocar), así que no había forma de volver a "una sola
 		// vez". Aquí null borra la recurrencia de verdad.
 		var p struct {
-			ID             int64 `json:"id"`
-			RecurrenceDays *int  `json:"recurrence_days"`
+			ID             int64  `json:"id"`
+			ClientID       string `json:"client_id"`
+			RecurrenceDays *int   `json:"recurrence_days"`
 		}
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
 		}
+		if p.RecurrenceDays != nil && *p.RecurrenceDays > maxRecurrenceDays {
+			return http.StatusBadRequest, errBody("recurrence_days out of range"), nil
+		}
+		tplID, found, err := resolveTemplateID(ctx, tx, hid, p.ID, p.ClientID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !found {
+			return http.StatusNotFound, errBody("template not found"), nil
+		}
+		p.ID = tplID
 		var days *int
 		if p.RecurrenceDays != nil && *p.RecurrenceDays > 0 {
 			days = p.RecurrenceDays
@@ -489,11 +531,20 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 
 	case "template.delete":
 		var p struct {
-			ID int64 `json:"id"`
+			ID       int64  `json:"id"`
+			ClientID string `json:"client_id"`
 		}
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
 		}
+		tplID, found, err := resolveTemplateID(ctx, tx, hid, p.ID, p.ClientID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !found {
+			return http.StatusNotFound, errBody("template not found"), nil
+		}
+		p.ID = tplID
 		rowVersion, err := db.NextRowVersion(ctx, tx)
 		if err != nil {
 			return 0, nil, err
@@ -509,6 +560,9 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		if n, _ := tag.RowsAffected(); n == 0 {
 			return http.StatusNotFound, errBody("template not found"), nil
 		}
+		if err := retirePendingInstances(ctx, tx, hid, p.ID, rowVersion); err != nil {
+			return 0, nil, err
+		}
 		return http.StatusOK, map[string]any{"id": p.ID}, nil
 
 	case "task.complete", "task.skip":
@@ -519,6 +573,10 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		}
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
+		}
+
+		if tooLongPtr(p.Notes, maxTextLen) {
+			return http.StatusBadRequest, errBody("notes too long"), nil
 		}
 
 		// completed_at lo manda el cliente: es el momento en que la persona marcó la
@@ -621,7 +679,7 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 			generated = append(generated, gid)
 		}
 		rows.Close()
-		if rows.Err() != nil {
+		if err := rows.Err(); err != nil {
 			return 0, nil, err
 		}
 
@@ -653,6 +711,14 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		}
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
+		}
+		if tooLongPtr(p.Notes, maxTextLen) {
+			return http.StatusBadRequest, errBody("notes too long"), nil
+		}
+		if ok, err := personInHousehold(ctx, tx, hid, p.AssignedToID); err != nil {
+			return 0, nil, err
+		} else if !ok {
+			return http.StatusBadRequest, errBody("assigned_to_id is not in your household"), nil
 		}
 		rowVersion, err := db.NextRowVersion(ctx, tx)
 		if err != nil {
@@ -686,6 +752,9 @@ func (s *Server) applyOp(ctx context.Context, tx *sql.Tx, person auth.Person, hi
 		}
 		if err := json.Unmarshal(m.Payload, &p); err != nil {
 			return http.StatusBadRequest, errBody("invalid payload"), nil
+		}
+		if tooLongPtr(p.Name, maxNameLen) || tooLongPtr(p.Color, maxColorLen) || tooLongPtr(p.Emoji, maxEmojiLen) {
+			return http.StatusBadRequest, errBody("name, color or emoji too long"), nil
 		}
 		rowVersion, err := db.NextRowVersion(ctx, tx)
 		if err != nil {

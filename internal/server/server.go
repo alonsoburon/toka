@@ -3,13 +3,15 @@ package server
 import (
 	"database/sql"
 	"net/http"
+	"os"
+	"strconv"
 
 	"toka/internal/auth"
 	"toka/internal/handler"
 )
 
 func New(database *sql.DB) http.Handler {
-	s := &handler.Server{DB: database}
+	s := &handler.Server{DB: database, MaxHouseholds: maxHouseholds()}
 	authMw := auth.Middleware(database)
 
 	mux := http.NewServeMux()
@@ -47,4 +49,14 @@ func New(database *sql.DB) http.Handler {
 	// 10 req/s por IP con ráfaga de 30; cuerpos de hasta 1 MB; 32 peticiones
 	// concurrentes. Holgado para dos teléfonos, incómodo para un script.
 	return newLimits(10, 30, 1<<20, 32).middleware(mux)
+}
+
+// maxHouseholds lee TOKA_MAX_HOUSEHOLDS (default 100; 0 desactiva el tope).
+func maxHouseholds() int {
+	if v := os.Getenv("TOKA_MAX_HOUSEHOLDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 100
 }
