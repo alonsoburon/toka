@@ -1,0 +1,10 @@
+[Unit]
+Description=Respaldo diario de toka.db
+
+[Timer]
+# 03:30 UTC: justo después del pg-backup de las 03:15.
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Respaldo de toka.db
+
+[Service]
+Type=oneshot
+# Ajusta TOKA_DB a la ruta en el host del volumen del contenedor.
+Environment=TOKA_DB=%h/apps/toka-data/toka.db
+Environment=TOKA_BACKUP_DIR=%h/backups/toka
+ExecStart=%h/apps/toka/deploy/backup-toka.sh

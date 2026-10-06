@@ -1,0 +1,7 @@
+.git
+android
+.env
+toka
+toka.db
+toka.db-shm
+toka.db-wal
