@@ -1,0 +1,138 @@
+rules_version = '2';
+
+// Toka: tareas del hogar. Solo los miembros de un hogar leen y escriben sus datos. Estas reglas
+// son la ÚNICA frontera entre hogares (antes lo era el filtro household_id del backend Go).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logueado() { return request.auth != null; }
+    function rutaHogar(hid) { return /databases/$(database)/documents/households/$(hid); }
+
+    // Lecturas: estado actual. Escrituras: estado tras el lote (permite crear hogar + datos juntos).
+    function esMiembro(hid) { return logueado() && request.auth.uid in get(rutaHogar(hid)).data.members; }
+    function seraMiembro(hid) { return logueado() && request.auth.uid in getAfter(rutaHogar(hid)).data.members; }
+    function miembroFuturo(hid, uid) { return uid in getAfter(rutaHogar(hid)).data.members; }
+
+    function texto(v, max) { return v is string && v.size() <= max; }
+    function textoONulo(v, max) { return v == null || texto(v, max); }
+    function colorValido(c) { return c is string && c.matches('^#[0-9A-Fa-f]{6}$'); }
+    function codigoValido(c) { return c is string && c.matches('^[A-Z0-9]{6}$'); }
+    function estadoValido(s) { return s in ['pending', 'done', 'skipped']; }
+
+    // Puntero usuario -> hogar. Cada uno solo el suyo.
+    match /users/{uid} {
+      allow read, delete: if logueado() && request.auth.uid == uid;
+      allow create, update: if logueado() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['householdId'])
+        && request.resource.data.householdId is string;
+    }
+
+    // Código de invitación -> hogar. Se puede consultar un código puntual, nunca listar.
+    // Regenerar el código = crear el nuevo y borrar el viejo (lo hace un miembro del hogar).
+    match /invites/{codigo} {
+      allow get: if logueado();
+      allow create: if codigoValido(codigo)
+        && request.resource.data.keys().hasOnly(['householdId'])
+        && seraMiembro(request.resource.data.householdId);
+      allow delete: if logueado() && esMiembro(resource.data.householdId);
+      allow list, update: if false;
+    }
+
+    match /households/{hid} {
+      allow read: if esMiembro(hid);
+
+      allow create: if logueado()
+        && request.resource.data.keys().hasOnly(['inviteCode', 'members', 'createdBy', 'createdAt'])
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.createdBy == request.auth.uid
+        && codigoValido(request.resource.data.inviteCode);
+
+      // Unirse: solo agregarse a uno mismo, sin quitar a nadie, máximo 10 miembros.
+      // Salir: solo quitarse a uno mismo. Regenerar invitación: cambia solo inviteCode.
+      allow update: if logueado() && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.resource.data.members.size() <= 10
+          && request.resource.data.members.toSet().difference(resource.data.members.toSet()) == [request.auth.uid].toSet()
+          && resource.data.members.toSet().difference(request.resource.data.members.toSet()).size() == 0)
+        ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.auth.uid in resource.data.members
+          && resource.data.members.toSet().difference(request.resource.data.members.toSet()) == [request.auth.uid].toSet()
+          && request.resource.data.members.toSet().difference(resource.data.members.toSet()).size() == 0)
+        ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inviteCode'])
+          && request.auth.uid in resource.data.members
+          && codigoValido(request.resource.data.inviteCode))
+      );
+
+      allow delete: if false;
+
+      // Cada persona edita solo su propio perfil. Al salir del hogar borra el suyo.
+      match /people/{pid} {
+        allow read: if esMiembro(hid);
+        allow create, update: if pid == request.auth.uid && seraMiembro(hid)
+          && request.resource.data.keys().hasOnly(['name', 'color', 'emoji'])
+          && texto(request.resource.data.name, 40) && request.resource.data.name.size() > 0
+          && colorValido(request.resource.data.color)
+          && texto(request.resource.data.emoji, 16);
+        allow delete: if pid == request.auth.uid;
+      }
+
+      // Plantillas: se dan de baja (isActive = false), no se borran.
+      match /templates/{tid} {
+        function plantillaValida(d) {
+          return d.keys().hasOnly(['name', 'description', 'recurrenceDays', 'preferredAssigneeId',
+                                   'reminderTimes', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+            && d.keys().hasAll(['name', 'isActive'])
+            && texto(d.name, 120) && d.name.size() > 0
+            && textoONulo(d.get('description', null), 2000)
+            && (d.get('recurrenceDays', null) == null
+                || (d.recurrenceDays is int && d.recurrenceDays >= 1 && d.recurrenceDays <= 3650))
+            // Solo se puede preferir a alguien del propio hogar.
+            && (d.get('preferredAssigneeId', null) == null
+                || (d.preferredAssigneeId is string && miembroFuturo(hid, d.preferredAssigneeId)))
+            && textoONulo(d.get('reminderTimes', null), 120)
+            && d.isActive is bool;
+        }
+        allow read: if esMiembro(hid);
+        allow create, update: if seraMiembro(hid) && plantillaValida(request.resource.data);
+        allow delete: if false;
+      }
+
+      // Instancias de tarea. Solo las pendientes se pueden borrar (deshacer un completado quita la
+      // instancia que generó; dar de baja una plantilla retira sus pendientes). El historial queda.
+      match /tasks/{iid} {
+        function tareaValida(d) {
+          return d.keys().hasOnly(['templateId', 'templateName', 'status', 'dueAt', 'assignedToId',
+                                   'completedById', 'completedAt', 'notes', 'generatedFrom',
+                                   'createdBy', 'createdAt', 'updatedAt'])
+            && d.keys().hasAll(['templateId', 'status', 'dueAt'])
+            && d.templateId is string
+            && textoONulo(d.get('templateName', null), 120)
+            && estadoValido(d.status)
+            && d.dueAt is timestamp
+            && textoONulo(d.get('notes', null), 2000)
+            // Solo se puede asignar a alguien del propio hogar.
+            && (d.get('assignedToId', null) == null
+                || (d.assignedToId is string && miembroFuturo(hid, d.assignedToId)))
+            // Una tarea pendiente no tiene quien la completó; una resuelta la completó quien escribe.
+            && (d.status == 'pending'
+                ? (d.get('completedById', null) == null && d.get('completedAt', null) == null)
+                : (d.get('completedById', null) == request.auth.uid && d.get('completedAt', null) is timestamp));
+        }
+        // Una instancia resuelta solo vuelve a pendiente tocando los campos de resolución
+        // (deshacer). Así un reenvío offline que recrea la "siguiente" no la resucita.
+        function reabrirValido() {
+          return resource.data.status == 'pending'
+            || request.resource.data.status != 'pending'
+            || request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'completedById', 'completedAt', 'updatedAt']);
+        }
+        allow read: if esMiembro(hid);
+        allow create: if seraMiembro(hid) && tareaValida(request.resource.data);
+        allow update: if seraMiembro(hid) && tareaValida(request.resource.data) && reabrirValido();
+        allow delete: if esMiembro(hid) && resource.data.status == 'pending';
+      }
+    }
+  }
+}
