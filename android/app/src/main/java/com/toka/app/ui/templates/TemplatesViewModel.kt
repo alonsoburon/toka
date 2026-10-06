@@ -59,6 +59,14 @@ class TemplatesViewModel(
         }
     }
 
+    fun setTrigger(id: String, triggerId: String?, delayDays: Int, recurrenceDays: Int?) {
+        viewModelScope.launch {
+            taskRepository.setTemplateTrigger(id, triggerId, delayDays, recurrenceDays).onFailure { e ->
+                _uiState.update { it.copy(error = e.message ?: "No se pudo actualizar") }
+            }
+        }
+    }
+
     fun delete(id: String) {
         viewModelScope.launch {
             taskRepository.deleteTemplate(id).onFailure { e ->

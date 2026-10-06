@@ -21,6 +21,7 @@ import com.toka.app.data.firebase.toIso
 import com.toka.app.data.firebase.toTask
 import com.toka.app.data.firebase.toTemplate
 import com.toka.app.data.firebase.toTimestamp
+import com.toka.app.data.descendantIds
 import com.toka.app.data.isoToLocalDate
 import com.toka.app.data.model.CompleteTaskResponse
 import com.toka.app.data.model.CreateTemplateRequest
@@ -295,13 +296,56 @@ class TaskRepository(
         )
     }
 
-    /** Baja la plantilla (no se borra) y retira sus tareas pendientes; el historial se conserva. */
+    /**
+     * Baja la plantilla (no se borra) y retira sus tareas pendientes; el historial se conserva. Las
+     * plantillas que cuelgan de ella en un flujo quedarían sin forma de nacer, así que se dan de baja también.
+     */
     suspend fun deleteTemplate(id: String): Result<Unit> = suspendCatching {
         val (_, hid) = identity()
+        val chained = descendantIds(id, activeTemplates(hid).map { it.toTemplate() })
         val batch = db.batch()
-        batch.update(db.templates(hid).document(id), mapOf("isActive" to false, "updatedAt" to Timestamp.now()))
-        retirePending(batch, hid, id)
+        (listOf(id) + chained).forEach { tid ->
+            batch.update(db.templates(hid).document(tid), mapOf("isActive" to false, "updatedAt" to Timestamp.now()))
+            retirePending(batch, hid, tid)
+        }
         send(batch.commit(), "borrar plantilla $id")
+    }
+
+    /**
+     * Pone o quita el disparador de una plantilla (null = se agenda sola). Una plantilla encadenada es de una
+     * sola vez. Al quitarle el disparador, si no le queda ninguna tarea pendiente se crea una, o no volvería a aparecer.
+     */
+    suspend fun setTemplateTrigger(
+        templateId: String,
+        triggerTemplateId: String?,
+        delayDays: Int?,
+        recurrenceDays: Int?
+    ): Result<Unit> = suspendCatching {
+        val (uid, hid) = identity()
+        val ref = db.templates(hid).document(templateId)
+        val now = Timestamp.now()
+        val batch = db.batch()
+        val changes = mutableMapOf<String, Any?>(
+            "triggerTemplateId" to triggerTemplateId,
+            "triggerDelayDays" to triggerTemplateId?.let { delayDays ?: 0 },
+            "updatedAt" to now
+        )
+        if (triggerTemplateId != null) changes["recurrenceDays"] = null
+        batch.update(ref, changes)
+        if (triggerTemplateId == null) {
+            val template = fetch(ref)
+            val hasPending = !queryOnce(
+                db.tasks(hid).whereEqualTo("templateId", templateId).whereEqualTo("status", "pending")
+            ).isEmpty
+            if (template != null && !hasPending) {
+                val due = Timestamp(now.seconds + (recurrenceDays ?: DEFAULT_DUE_DAYS) * 86_400L, now.nanoseconds)
+                batch.set(
+                    db.tasks(hid).document(),
+                    taskData(templateId, template.getString("name"), due, template.getString("preferredAssigneeId"), uid, now)
+                )
+            }
+        }
+        send(batch.commit(), "disparador $templateId")
     }
 
     /** Todo es en vivo: no hay nada que "bajar". Se conserva por compatibilidad con el gesto de recargar. */
@@ -379,16 +423,20 @@ class TaskRepository(
         pending.documents.forEach { batch.update(it.reference, mapOf("templateName" to name, "updatedAt" to Timestamp.now())) }
     }
 
-    /** Plantillas activas encadenadas a [templateId]. Cache primero: completar no debe esperar a la red. */
-    private suspend fun followers(hid: String, templateId: String): List<DocumentSnapshot> {
-        val query = db.templates(hid).whereEqualTo("triggerTemplateId", templateId)
+    /** Plantillas activas del hogar. Cache primero: completar o borrar no debe esperar a la red. */
+    private suspend fun activeTemplates(hid: String): List<DocumentSnapshot> {
+        val query = db.templates(hid).whereEqualTo("isActive", true)
         val snap = try {
             query.get(Source.CACHE).await()
         } catch (_: FirebaseFirestoreException) {
             queryOnce(query)
         }
-        return snap.documents.filter { it.getBoolean("isActive") != false }
+        return snap.documents
     }
+
+    /** Plantillas activas encadenadas directamente a [templateId]. */
+    private suspend fun followers(hid: String, templateId: String): List<DocumentSnapshot> =
+        activeTemplates(hid).filter { it.getString("triggerTemplateId") == templateId }
 
     private fun taskData(
         templateId: String,

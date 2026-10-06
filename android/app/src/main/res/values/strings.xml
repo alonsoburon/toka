@@ -201,4 +201,6 @@
     <string name="create_trigger_none">Ninguna</string>
     <string name="create_trigger_delay">¿Cuándo vence?</string>
     <string name="create_trigger_same_day">El mismo día</string>
+    <string name="templates_trigger_row">↳ Tras «%1$s» · %2$s</string>
+    <string name="templates_delete_chain">También se eliminarán las tareas encadenadas: %1$s.</string>
 </resources>

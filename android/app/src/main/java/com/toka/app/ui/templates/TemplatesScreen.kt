@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.R
+import com.toka.app.data.descendantIds
 import com.toka.app.data.model.PersonDTO
 import com.toka.app.data.model.TemplateDTO
 import com.toka.app.data.model.UpdateTemplateRequest
@@ -68,6 +69,7 @@ import com.toka.app.ui.components.EmptyState
 import com.toka.app.ui.components.LoadingShimmer
 import com.toka.app.ui.components.PersonChip
 import com.toka.app.ui.components.ReminderTimesField
+import com.toka.app.ui.components.TriggerPicker
 import com.toka.app.ui.theme.CardBg
 import com.toka.app.ui.theme.Pink
 import com.toka.app.ui.theme.SkipRed
@@ -136,6 +138,7 @@ fun TemplatesScreen(
                     TemplateRow(
                         template = template,
                         people = uiState.people,
+                        triggerName = uiState.templates.firstOrNull { it.id == template.triggerTemplateId }?.name,
                         onClick = { editing = template },
                         onDelete = { toDelete = template }
                     )
@@ -149,9 +152,18 @@ fun TemplatesScreen(
         EditTemplateDialog(
             template = template,
             people = uiState.people,
+            // Sin ella misma ni lo que cuelga de ella: un ciclo no tendría dónde empezar.
+            candidates = uiState.templates.filter {
+                it.id != template.id && it.id !in descendantIds(template.id, uiState.templates)
+            },
             onDismiss = { editing = null },
-            onSave = { request, days ->
+            onSave = { request, days, triggerId, delayDays ->
                 viewModel.update(template.id, request)
+                if (triggerId != template.triggerTemplateId ||
+                    (triggerId != null && delayDays != (template.triggerDelayDays ?: 0))
+                ) {
+                    viewModel.setTrigger(template.id, triggerId, delayDays, days)
+                }
                 if (days != template.recurrenceDays) {
                     viewModel.setRecurrence(template.id, days)
                 }
@@ -161,10 +173,18 @@ fun TemplatesScreen(
     }
 
     toDelete?.let { template ->
+        val chained = descendantIds(template.id, uiState.templates)
+            .mapNotNull { id -> uiState.templates.firstOrNull { it.id == id }?.name }
         AlertDialog(
             onDismissRequest = { toDelete = null },
             title = { Text(stringResource(R.string.templates_delete_title)) },
-            text = { Text(stringResource(R.string.templates_delete_message, template.name)) },
+            text = {
+                Text(
+                    stringResource(R.string.templates_delete_message, template.name) +
+                        if (chained.isEmpty()) "" else "\n\n" +
+                            stringResource(R.string.templates_delete_chain, chained.joinToString(", "))
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(template.id)
@@ -182,11 +202,19 @@ fun TemplatesScreen(
 private fun TemplateRow(
     template: TemplateDTO,
     people: List<PersonDTO>,
+    triggerName: String?,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     val assignee = people.firstOrNull { it.id == template.preferredAssigneeId }
-    val recurrence = template.recurrenceDays
+    val recurrence = if (template.triggerTemplateId != null) {
+        val delay = template.triggerDelayDays ?: 0
+        stringResource(
+            R.string.templates_trigger_row,
+            triggerName ?: "…",
+            if (delay == 0) stringResource(R.string.create_trigger_same_day) else "+$delay d"
+        )
+    } else template.recurrenceDays
         ?.let { pluralStringResource(R.plurals.templates_recurrence_every, it, it) }
         ?: stringResource(R.string.templates_once)
     val reminders = template.reminderTimes?.takeIf { it.isNotBlank() }
@@ -252,9 +280,12 @@ private fun TemplateRow(
 private fun EditTemplateDialog(
     template: TemplateDTO,
     people: List<PersonDTO>,
+    candidates: List<TemplateDTO>,
     onDismiss: () -> Unit,
-    onSave: (UpdateTemplateRequest, Int?) -> Unit
+    onSave: (UpdateTemplateRequest, Int?, String?, Int) -> Unit
 ) {
+    var triggerId by remember { mutableStateOf(template.triggerTemplateId) }
+    var triggerDelay by remember { mutableStateOf(template.triggerDelayDays ?: 0) }
     var name by remember { mutableStateOf(template.name) }
     var description by remember { mutableStateOf(template.description ?: "") }
     var selectedPersonId by remember { mutableStateOf(template.preferredAssigneeId) }
@@ -268,8 +299,8 @@ private fun EditTemplateDialog(
     var daysText by remember {
         mutableStateOf(template.recurrenceDays?.toString() ?: "7")
     }
-    val days = if (makeRecurring) daysText.toIntOrNull()?.takeIf { it > 0 } else null
-    val validRecurrence = !makeRecurring || days != null
+    val days = if (makeRecurring && triggerId == null) daysText.toIntOrNull()?.takeIf { it > 0 } else null
+    val validRecurrence = triggerId != null || !makeRecurring || days != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -301,7 +332,20 @@ private fun EditTemplateDialog(
 
                 Spacer(Modifier.height(12.dp))
 
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                if (candidates.isNotEmpty()) {
+                    TriggerPicker(
+                        candidates = candidates,
+                        triggerId = triggerId,
+                        delayDays = triggerDelay,
+                        onChange = { id, d ->
+                            triggerId = id
+                            triggerDelay = d
+                        }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                if (triggerId == null) SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     SegmentedButton(
                         selected = !makeRecurring,
                         onClick = { makeRecurring = false },
@@ -315,7 +359,7 @@ private fun EditTemplateDialog(
                 }
                 Spacer(Modifier.height(8.dp))
 
-                if (makeRecurring) {
+                if (makeRecurring && triggerId == null) {
                     OutlinedTextField(
                         value = daysText,
                         onValueChange = { daysText = it.filter { c -> c.isDigit() } },
@@ -366,7 +410,9 @@ private fun EditTemplateDialog(
                             preferredAssigneeId = selectedPersonId,
                             reminderTimes = reminder ?: ""
                         ),
-                        days
+                        days,
+                        triggerId,
+                        triggerDelay
                     )
                 },
                 enabled = name.isNotBlank() && validRecurrence,
