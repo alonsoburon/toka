@@ -36,17 +36,17 @@ chocar con los de Finanzas (9099 / 8085), que nunca se tocan. Con un teléfono r
 
 ## Firebase real: checklist de consola
 
-Proyecto `toka-hogar-e194` (cuenta nuxapower@gmail.com), Firestore en `southamerica-west1`, plan Spark.
-Ya hecho por API: proyecto de Google Cloud, base de datos Firestore y reglas publicadas
-(`scripts/publicar-reglas.sh`). Pasos manuales pendientes (la cuenta aún no aceptó los términos de
-Firebase y la API de gestión lo exige desde la consola):
+Proyecto `toka-hogar-037f` (cuenta alonso@tucunar.com, organización Tucunar), Firestore en `southamerica-west1`, plan Spark.
+Ya hecho por API (cuenta `alonso@tucunar.com`): proyecto, Firebase agregado, base de datos Firestore, reglas
+publicadas (`scripts/publicar-reglas.sh`), app Android `com.toka.app` registrada con la huella SHA-1 de
+release `88:7E:EC:40:9C:3C:D5:A5:F0:CA:F6:48:09:F3:7A:BB:17:37:24:32`.
 
-- [ ] Agregar Firebase al proyecto de Google Cloud existente (consola → "Agregar proyecto" → elegir `toka-hogar-e194`).
-- [ ] Registrar la app Android `com.toka.app` con la huella SHA-1 de release
-      `88:7E:EC:40:9C:3C:D5:A5:F0:CA:F6:48:09:F3:7A:BB:17:37:24:32`.
-- [ ] Habilitar Authentication → proveedor Google.
-- [ ] Descargar `google-services.json` a `android/app/` (gitignoreado) y, para CI, guardarlo en base64
-      como secret `GOOGLE_SERVICES_JSON_BASE64`.
+Falta un paso en la consola (inicializar Authentication por API exige facturación):
+
+- [ ] Firebase console → proyecto `toka-hogar-037f` → Authentication → "Comenzar" → proveedor **Google** → Habilitar
+      (con un correo de asistencia). Eso crea el cliente OAuth web que necesita el login.
+- [ ] Descargar la configuración con el cliente OAuth ya incluido y dejarla en `android/app/google-services.json`
+      (gitignoreado); para CI, en base64 como secret `GOOGLE_SERVICES_JSON_BASE64`.
 - [x] Reglas publicadas (repetir `scripts/publicar-reglas.sh` cada vez que cambie `firestore.rules`).
 
 ## Releases e instalación con Obtainium

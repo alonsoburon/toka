@@ -14,7 +14,7 @@ features. Las skills `/migration`, `/endpoint`, `/smoke` y `/schema` aplican sol
 scripts/test-rules.sh                        # prueba firestore.rules (emulador propio)
 scripts/dev.sh                               # emuladores Firebase + emulador Android + "Toka DEV"
 scripts/dev.sh --parar                       # detiene los emuladores de Toka
-scripts/publicar-reglas.sh                   # publica reglas en toka-hogar-e194 (solo si se pide)
+scripts/publicar-reglas.sh                   # publica reglas en toka-hogar-037f (solo si se pide)
 cd android && ./gradlew compileDebugKotlin   # verificación rápida
 cd android && ./gradlew assembleDebug
 ```

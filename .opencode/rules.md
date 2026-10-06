@@ -12,7 +12,7 @@
 ## Quick commands
 - `scripts/test-rules.sh` — prueba las reglas con un emulador propio (Auth 9199 / Firestore 8185).
 - `scripts/dev.sh` — emuladores + emulador Android + instala "Toka DEV" (`--parar` los detiene).
-- `scripts/publicar-reglas.sh` — publica reglas en `toka-hogar-e194` (solo si se pide).
+- `scripts/publicar-reglas.sh` — publica reglas en `toka-hogar-037f` (solo si se pide).
 - `cd android && ./gradlew compileDebugKotlin` / `assembleDebug`.
 
 Nunca uses `pkill -f` ni toques los emuladores de Finanzas (9099 / 8085).

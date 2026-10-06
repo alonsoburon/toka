@@ -37,7 +37,7 @@ scripts/test-rules.sh        # 50 comprobaciones de firestore.rules con emulador
 scripts/dev.sh               # emuladores Firebase + emulador Android + instala "Toka DEV"
 scripts/dev.sh --sin-compilar   # idem sin recompilar
 scripts/dev.sh --parar       # detiene los emuladores de Toka (por PID)
-scripts/publicar-reglas.sh   # publica firestore.rules en toka-hogar-e194
+scripts/publicar-reglas.sh   # publica firestore.rules en toka-hogar-037f
 cd android && ./gradlew compileDebugKotlin   # verificación rápida de tipos
 cd android && ./gradlew assembleDebug        # APK debug
 ```
@@ -128,7 +128,7 @@ workers leen de la **caché de Firestore** vía `SessionCache`. Son notificacion
 - **Release:** `com.toka.app`; necesita `android/app/google-services.json` real (gitignoreado).
   En CI sale del secret `GOOGLE_SERVICES_JSON_BASE64` (`.github/workflows/release.yml`, falla si falta),
   además de los secrets del keystore.
-- **Proyecto Firebase:** `toka-hogar-e194` (cuenta nuxapower@gmail.com), Firestore en
+- **Proyecto Firebase:** `toka-hogar-037f` (cuenta alonso@tucunar.com, organización Tucunar), Firestore en
   `southamerica-west1`, plan Spark. Checklist de consola pendiente en `README.md`.
 
 ## Estructura (Android)
