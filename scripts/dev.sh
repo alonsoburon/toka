@@ -19,10 +19,17 @@ JAVA21="${JAVA21_HOME:-/usr/lib/jvm/java-26-openjdk}"
 
 if [ "${1:-}" = "--parar" ]; then
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-    kill -INT -- "-$(cat "$PIDFILE")" && rm -f "$PIDFILE" && echo "Emuladores de Firebase de Toka detenidos (datos en .emulador/)"
-  else
-    echo "No estaban corriendo (o no los levantó este script)"
+    kill -INT -- "-$(cat "$PIDFILE")" 2>/dev/null || true
   fi
+  rm -f "$PIDFILE"
+  sleep 5
+  # Si quedó el Java del emulador huérfano, se cierra por SU puerto (8185/9199: los de Toka). Nunca por
+  # nombre de proceso ni en los puertos de Finanzas (8085/9099).
+  for port in 8185 9199 4100; do
+    pid=$(ss -ltnp 2>/dev/null | grep -E ":${port} " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+    [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null || true
+  done
+  echo "Emuladores de Firebase de Toka detenidos (datos en .emulador/)"
   exit 0
 fi
 
