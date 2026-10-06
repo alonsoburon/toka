@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.toka.app.R
 import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.isoToLocalDate
 import com.toka.app.ui.theme.*
 import java.time.Instant
 import java.time.LocalDate
@@ -29,12 +30,7 @@ import java.time.temporal.ChronoUnit
 
 private enum class TaskDueStatus { OVERDUE, DUE_SOON, NORMAL }
 
-private fun parseDate(dateString: String?): LocalDate? {
-    if (dateString == null) return null
-    return try {
-        LocalDate.parse(dateString.substringBefore("T"))
-    } catch (_: Exception) { null }
-}
+private fun parseDate(dateString: String?): LocalDate? = isoToLocalDate(dateString)
 
 /**
  * Atrasada = el instante de vencimiento ya pasó, igual que agrupa el Dashboard. Antes

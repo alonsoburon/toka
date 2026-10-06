@@ -31,9 +31,14 @@ class SyncWorker(
         return engine.sync().fold(
             onSuccess = { Result.success() },
             onFailure = {
-                // retry() reprograma con el backoff exponencial configurado abajo.
-                // La cola no se pierde: sigue en SQLite con sus mutation_id intactos.
-                if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.failure()
+                when {
+                    // Sin sesión no hay nada que reintentar: la UI ya llevó al login.
+                    it is SessionExpiredException -> Result.success()
+                    // retry() reprograma con el backoff exponencial configurado abajo.
+                    // La cola no se pierde: sigue en SQLite con sus mutation_id intactos.
+                    runAttemptCount < MAX_ATTEMPTS -> Result.retry()
+                    else -> Result.failure()
+                }
             }
         )
     }

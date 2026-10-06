@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.R
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.di.AppContainer
+import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState
 import com.toka.app.ui.components.TaskCard
 import com.toka.app.ui.theme.Pink
@@ -53,7 +54,7 @@ import com.toka.app.ui.theme.TextPrimary
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen() {
-    val viewModel = remember { HistoryViewModel(AppContainer.instance.taskRepository) }
+    val viewModel = tokaViewModel { HistoryViewModel(AppContainer.instance.taskRepository) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 

@@ -231,7 +231,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         label = { Text(stringResource(R.string.settings_server_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("https://8-235-73-211.sslip.io") }
+                        placeholder = { Text("https://toka.nuxapower.cl") }
                     )
                 }
             },
@@ -242,9 +242,10 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         if (newServerUrl.isNotBlank()) {
                             isCheckingServer = true
                             scope.launch {
-                                AppContainer.instance.checkServer(newServerUrl)
+                                val reconnected = AppContainer.instance.checkServer(newServerUrl)
+                                    .mapCatching { AppContainer.instance.reconnect(newServerUrl).getOrThrow() }
+                                reconnected
                                     .onSuccess {
-                                        AppContainer.instance.reconnect(newServerUrl)
                                         showServerDialog = false
                                         AppContainer.instance.authRepository.logout()
                                         onLogout()

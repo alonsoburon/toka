@@ -76,8 +76,13 @@ class TokenStore(private val context: Context) {
         context.dataStore.edit { it[serverUrlKey] = url }
     }
 
+    /** Cierra la sesión pero conserva el servidor elegido: volver a entrar no debería pedirlo de nuevo. */
     suspend fun clearSession() {
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit { prefs ->
+            val server = prefs[serverUrlKey]
+            prefs.clear()
+            if (server != null) prefs[serverUrlKey] = server
+        }
     }
 
     suspend fun getServerUrl(): String? {

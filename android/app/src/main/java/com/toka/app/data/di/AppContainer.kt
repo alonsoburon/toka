@@ -10,8 +10,12 @@ import com.toka.app.data.local.TokaDatabase
 import com.toka.app.data.repository.TaskRepository
 import com.toka.app.data.sync.SyncEngine
 import com.toka.app.data.sync.SyncWorker
+import com.toka.app.data.suspendCatching
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -35,12 +39,30 @@ class AppContainer private constructor(application: Application) {
 
     // El Retrofit activo. Los repositorios lo leen a través de un lambda en vez de
     // guardarlo, así cambiar de servidor (reconnect) no deja referencias viejas.
+    @Volatile
     private lateinit var api: TokaApi
+
+    // Un solo cliente HTTP (pool de conexiones y threads compartidos) para todas las
+    // llamadas, incluidas las de comprobar un servidor.
+    private val httpClient: OkHttpClient by lazy {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            // BODY expone datos en logcat: solo en debug, y sin el token.
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BODY
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
+            redactHeader("Authorization")
+        }
+        OkHttpClient.Builder().addInterceptor(loggingInterceptor).build()
+    }
 
     init {
         tokenStore = TokenStore(application.applicationContext)
 
-        syncEngine = SyncEngine({ api }, dao, tokenStore)
+        syncEngine = SyncEngine({ api }, dao, tokenStore) {
+            com.toka.app.widget.TodayWidgetProvider.refresh(appContext)
+        }
         authRepository = AuthRepository({ api }, tokenStore)
         taskRepository = TaskRepository(dao, syncEngine, appContext)
         peopleRepository = PeopleRepository({ api }, tokenStore, dao, syncEngine, appContext)
@@ -50,19 +72,6 @@ class AppContainer private constructor(application: Application) {
     }
 
     private fun buildApi(baseUrl: String): TokaApi {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            // BODY expone tokens y datos en logcat: solo en debug.
-            level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
-            } else {
-                HttpLoggingInterceptor.Level.NONE
-            }
-        }
-
-        val okHttpClient = OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
-            .build()
-
         val json = Json {
             ignoreUnknownKeys = true
             isLenient = true
@@ -71,44 +80,55 @@ class AppContainer private constructor(application: Application) {
 
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)
-            .client(okHttpClient)
+            .client(httpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
 
         return retrofit.create(TokaApi::class.java)
     }
 
-    fun reconnect(url: String) {
+    /**
+     * Cambia de servidor. Valida la URL antes de tocar nada (Retrofit lanza si es
+     * inválida, y antes eso ocurría después de borrar la caché local) y corre en IO.
+     */
+    suspend fun reconnect(url: String): Result<Unit> = suspendCatching {
         val normalized = normalizeBaseUrl(url)
-        runBlocking {
+        requireNotNull(normalized.toHttpUrlOrNull()) { "URL de servidor inválida: $url" }
+        val newApi = buildApi(normalized)
+        withContext(Dispatchers.IO) {
             tokenStore.saveServerUrl(normalized)
             // Otro servidor es otro conjunto de datos. La caché del anterior no vale
             // y el cursor tampoco: se empieza de cero.
             syncEngine.reset()
         }
-        api = buildApi(normalized)
-        SyncWorker.syncNow(appContext)
+        api = newApi
     }
 
     /** Comprueba que en `url` responde un servidor Toka, sin guardar nada. */
-    suspend fun checkServer(url: String): Result<Unit> = runCatching {
-        buildApi(normalizeBaseUrl(url)).health()
+    suspend fun checkServer(url: String): Result<Unit> = suspendCatching {
+        val normalized = normalizeBaseUrl(url)
+        requireNotNull(normalized.toHttpUrlOrNull()) { "URL de servidor inválida: $url" }
+        buildApi(normalized).health()
     }.map { }
 
-    /** Acepta "192.168.1.5:3000" y lo convierte en una base URL de Retrofit válida. */
+    /**
+     * Acepta "toka.example.com" y lo convierte en una base URL de Retrofit válida. Sin
+     * esquema se asume https; solo el build debug (que permite cleartext para el
+     * emulador y la LAN) asume http.
+     */
     private fun normalizeBaseUrl(url: String): String {
         val trimmed = url.trim()
         val withScheme = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
             trimmed
         } else {
-            "http://$trimmed"
+            (if (BuildConfig.DEBUG) "http://" else "https://") + trimmed
         }
         return if (withScheme.endsWith("/")) withScheme else "$withScheme/"
     }
 
     /** Fuerza un ciclo de sincronización (p. ej. apenas termina el onboarding). */
     fun syncNow() {
-        SyncWorker.syncNow(appContext)
+        syncEngine.kick(appContext)
     }
 
     companion object {

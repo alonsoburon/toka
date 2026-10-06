@@ -182,7 +182,7 @@
     <string name="onboarding_token_hint">El token que te dio el servidor (por ejemplo, el del seed).</string>
     <string name="onboarding_token_enter">Entrar con token</string>
     <string name="onboarding_server_label">Servidor</string>
-    <string name="onboarding_server_hint">URL del backend, p. ej. http://192.168.100.8:3000</string>
+    <string name="onboarding_server_hint">URL del backend, p. ej. https://toka.nuxapower.cl</string>
     <string name="onboarding_household_name">Nombre del hogar</string>
     <string name="onboarding_household_placeholder">Casa de los Gómez</string>
     <string name="onboarding_code_label">Código</string>
@@ -201,5 +201,14 @@
     <string name="notif_channel_description">Tareas que debes hacer hoy</string>
     <string name="notif_complete_action">✓ Completar</string>
     <string name="notif_skip_action">Saltar</string>
+    <string name="widget_description">Tus tareas de hoy, en grande</string>
+    <string name="widget_title_today">Hoy · %1$d</string>
+    <string name="widget_title_empty">Hoy</string>
+    <string name="widget_preview_title">Hoy · 2</string>
+    <string name="widget_preview_task_1">Sacar la basura</string>
+    <string name="widget_preview_task_2">Lavar los platos</string>
+    <string name="widget_empty">Nada pendiente 🎉</string>
+    <string name="widget_signed_out">Abre Toka para entrar</string>
+    <string name="widget_more">+%1$d más</string>
     <string name="notif_text">Pendiente · aviso de las %1$s</string>
 </resources>

@@ -1,6 +1,7 @@
 package com.toka.app.data.repository
 
 import android.content.Context
+import com.toka.app.data.suspendCatching
 import com.toka.app.data.api.CompleteTaskResponse
 import com.toka.app.data.api.CreateTemplateRequest
 import com.toka.app.data.api.TaskDTO
@@ -64,32 +65,32 @@ class TaskRepository(
 
     // ── Lecturas puntuales (compatibilidad con los ViewModels actuales) ───────
 
-    suspend fun getPendingTasks(): Result<List<TaskDTO>> = runCatching {
+    suspend fun getPendingTasks(): Result<List<TaskDTO>> = suspendCatching {
         val people = dao.peopleOnce()
         dao.pendingTasksOnce(nowIso()).map { it.toDto(people) }
     }
 
-    suspend fun getHistory(days: Int = 30): Result<List<TaskDTO>> = runCatching {
+    suspend fun getHistory(days: Int = 30): Result<List<TaskDTO>> = suspendCatching {
         val cutoff = Instant.now().minus(days.toLong(), ChronoUnit.DAYS)
         val people = dao.peopleOnce()
         dao.historyOnce()
             .filter { row ->
-                val at = row.completedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                val at = row.completedAt?.let { suspendCatching { Instant.parse(it) }.getOrNull() }
                 at == null || at.isAfter(cutoff)
             }
             .map { it.toDto(people) }
     }
 
-    suspend fun getTemplates(): Result<List<TemplateDTO>> = runCatching {
+    suspend fun getTemplates(): Result<List<TemplateDTO>> = suspendCatching {
         dao.activeTemplatesOnce().map { it.toDto() }
     }
 
-    suspend fun getTask(taskId: Long): Result<TaskDTO> = runCatching {
+    suspend fun getTask(taskId: Long): Result<TaskDTO> = suspendCatching {
         val people = dao.peopleOnce()
         dao.taskOnce(taskId)?.toDto(people) ?: error("task $taskId not found")
     }
 
-    suspend fun getTemplate(templateId: Long): Result<TemplateDTO> = runCatching {
+    suspend fun getTemplate(templateId: Long): Result<TemplateDTO> = suspendCatching {
         dao.activeTemplatesOnce().firstOrNull { it.id == templateId }?.toDto()
             ?: error("template $templateId not found")
     }
@@ -107,7 +108,7 @@ class TaskRepository(
      * encola `task.uncomplete`, que en el servidor además borra la instancia que la
      * recurrencia había generado.
      */
-    suspend fun undoTask(taskId: Long): Result<Unit> = runCatching {
+    suspend fun undoTask(taskId: Long): Result<Unit> = suspendCatching {
         val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
         dao.upsertTask(
             row.copy(
@@ -117,7 +118,7 @@ class TaskRepository(
             )
         )
         sync.enqueue("task.uncomplete", buildJsonObject { put("id", JsonPrimitive(taskId)) })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
     }
 
     private suspend fun resolve(
@@ -125,7 +126,7 @@ class TaskRepository(
         newStatus: String,
         op: String,
         notes: String?
-    ): Result<CompleteTaskResponse> = runCatching {
+    ): Result<CompleteTaskResponse> = suspendCatching {
         val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
         val now = Instant.now().toString()
 
@@ -146,7 +147,7 @@ class TaskRepository(
             put("completed_at", JsonPrimitive(now))
             put("notes", notes?.let { JsonPrimitive(it) } ?: JsonNull)
         })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
 
         CompleteTaskResponse(status = newStatus, nextDueAt = null)
     }
@@ -156,7 +157,7 @@ class TaskRepository(
         assignedToId: Long? = null,
         notes: String? = null,
         dueAt: String? = null
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = suspendCatching {
         val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
         dao.upsertTask(
             row.copy(
@@ -172,10 +173,10 @@ class TaskRepository(
             put("notes", notes?.let { JsonPrimitive(it) } ?: JsonNull)
             put("due_at", dueAt?.let { JsonPrimitive(it) } ?: JsonNull)
         })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
     }
 
-    suspend fun createTemplate(request: CreateTemplateRequest): Result<TemplateDTO> = runCatching {
+    suspend fun createTemplate(request: CreateTemplateRequest): Result<TemplateDTO> = suspendCatching {
         val clientId = sync.newClientId()
         val provisionalId = sync.provisionalIdFor(clientId)
 
@@ -208,13 +209,13 @@ class TaskRepository(
             )
             put("reminder_times", request.reminderTimes?.let { JsonPrimitive(it) } ?: JsonNull)
         })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
 
         local.toDto()
     }
 
     suspend fun updateTemplate(id: Long, request: UpdateTemplateRequest): Result<TemplateDTO> =
-        runCatching {
+        suspendCatching {
             val row = dao.activeTemplatesOnce().firstOrNull { it.id == id }
                 ?: error("template $id not found")
             val updated = row.copy(
@@ -229,6 +230,7 @@ class TaskRepository(
 
             sync.enqueue("template.update", buildJsonObject {
                 put("id", JsonPrimitive(id))
+                provisionalClientId(row)?.let { put("client_id", JsonPrimitive(it)) }
                 put("name", request.name?.let { JsonPrimitive(it) } ?: JsonNull)
                 put("description", request.description?.let { JsonPrimitive(it) } ?: JsonNull)
                 put(
@@ -241,7 +243,7 @@ class TaskRepository(
                 )
                 put("reminder_times", request.reminderTimes?.let { JsonPrimitive(it) } ?: JsonNull)
             })
-            SyncWorker.syncNow(appContext)
+            sync.kick(appContext)
 
             updated.toDto()
         }
@@ -252,23 +254,39 @@ class TaskRepository(
      * significa "no tocar" y no se podría borrar la recurrencia.
      */
     suspend fun setTemplateRecurrence(templateId: Long, recurrenceDays: Int?): Result<Unit> =
-        runCatching {
+        suspendCatching {
             val row = dao.activeTemplatesOnce().firstOrNull { it.id == templateId }
                 ?: error("template $templateId not found")
             dao.upsertTemplate(row.copy(recurrenceDays = recurrenceDays, pending = true))
 
             sync.enqueue("template.set_recurrence", buildJsonObject {
                 put("id", JsonPrimitive(templateId))
+                provisionalClientId(row)?.let { put("client_id", JsonPrimitive(it)) }
                 put("recurrence_days", recurrenceDays?.let { JsonPrimitive(it) } ?: JsonNull)
             })
-            SyncWorker.syncNow(appContext)
+            sync.kick(appContext)
         }
 
-    suspend fun deleteTemplate(id: Long): Result<Unit> = runCatching {
+    suspend fun deleteTemplate(id: Long): Result<Unit> = suspendCatching {
+        val row = dao.activeTemplatesOnce().firstOrNull { it.id == id }
         dao.deleteTemplate(id)
-        sync.enqueue("template.delete", buildJsonObject { put("id", JsonPrimitive(id)) })
-        SyncWorker.syncNow(appContext)
+        // Sus tareas pendientes se van con ella, sin esperar a que el servidor mande los
+        // tombstones: offline, la tarea de una plantilla borrada no debe seguir en pantalla.
+        dao.deletePendingTasksOfTemplate(id)
+        sync.enqueue("template.delete", buildJsonObject {
+            put("id", JsonPrimitive(id))
+            row?.let { provisionalClientId(it) }?.let { put("client_id", JsonPrimitive(it)) }
+        })
+        sync.kick(appContext)
     }
+
+    /**
+     * Una plantilla creada sin conexión vive con un id negativo; las ediciones que se
+     * encolan antes de que el servidor la confirme llevan su client_id, que es lo único
+     * que el servidor conoce de ella.
+     */
+    private fun provisionalClientId(row: TemplateEntity): String? =
+        if (row.id < 0) row.clientId else null
 
     /** Fuerza un ciclo y espera (para el gesto de deslizar para recargar). */
     suspend fun refresh(): Result<Unit> = sync.sync()
@@ -277,7 +295,7 @@ class TaskRepository(
      * Tareas pendientes que vencen hoy y cuyo template tiene recordatorios. El worker
      * de notificaciones lo usa; los horarios son hora local del teléfono.
      */
-    suspend fun reminderCandidates(): List<ReminderCandidate> = runCatching {
+    suspend fun reminderCandidates(): List<ReminderCandidate> = suspendCatching {
         val templates = dao.activeTemplatesOnce().associateBy { it.id }
         val today = LocalDate.now()
         dao.allPendingOnce().mapNotNull { task ->
@@ -302,8 +320,23 @@ class TaskRepository(
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * Para el widget "Mis tareas de hoy": pendientes que vencen hoy o ya están atrasadas
+     * (por fecha LOCAL), de esa persona o sin asignar, las más viejas primero.
+     */
+    suspend fun todayTasks(personId: Long?): List<WidgetTask> = suspendCatching {
+        val today = LocalDate.now()
+        dao.allPendingOnce()
+            .filter { it.assignedToId == null || it.assignedToId == personId }
+            .filter { task -> parseLocalDate(task.dueAt ?: return@filter false)?.let { !it.isAfter(today) } ?: false }
+            .sortedBy { it.dueAt }
+            .map { WidgetTask(it.id, it.templateName ?: "Tarea pendiente") }
+    }.getOrDefault(emptyList())
+
     private fun nowIso(): String = Instant.now().toString()
 }
+
+data class WidgetTask(val id: Long, val name: String)
 
 data class ReminderCandidate(
     val taskId: Long,

@@ -71,6 +71,7 @@ import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.api.UpdateTemplateRequest
 import com.toka.app.data.di.AppContainer
+import com.toka.app.data.endOfLocalDay
 import com.toka.app.ui.components.PersonChip
 import com.toka.app.ui.components.ReminderTimesField
 import com.toka.app.ui.theme.CardBg
@@ -85,6 +86,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -109,45 +111,42 @@ fun TaskDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    fun loadTask() {
-        scope.launch {
-            isLoading = true
-            AppContainer.instance.taskRepository.getTask(taskId)
-                .onSuccess {
-                    task = it
-                    isLoading = false
-                    it.templateId?.let { tid ->
-                        AppContainer.instance.taskRepository.getTemplate(tid)
-                            .onSuccess { tpl ->
-                                reminderTimes = tpl.reminderTimes
-                                templateRecurrence = tpl.recurrenceDays
-                            }
-                    }
-                }
-                .onFailure { error = it.message; isLoading = false }
+    // La pantalla observa Room: si otro teléfono completa la tarea, o el sync cambia algo,
+    // se redibuja sola, y las acciones no necesitan "recargar" ni parpadean a pantalla de
+    // carga. Antes eran lecturas puntuales.
+    LaunchedEffect(taskId) {
+        AppContainer.instance.taskRepository.taskFlow(taskId).collect {
+            task = it
+            isLoading = false
         }
     }
+    LaunchedEffect(task?.templateId) {
+        val templateId = task?.templateId ?: return@LaunchedEffect
+        AppContainer.instance.taskRepository.templates.collect { list ->
+            val tpl = list.firstOrNull { it.id == templateId }
+            reminderTimes = tpl?.reminderTimes
+            templateRecurrence = tpl?.recurrenceDays
+        }
+    }
+    LaunchedEffect(Unit) {
+        AppContainer.instance.peopleRepository.people.collect { people = it }
+    }
 
-    /** Reprograma a "hoy + n días" desde los chips rápidos. */
+    /** Reprograma a "hoy + n días" desde los chips rápidos (vence al final de ese día). */
     fun reschedule(daysFromNow: Long) {
-        val target = LocalDate.now().plusDays(daysFromNow)
-            .atStartOfDay(ZoneId.systemDefault())
-            .toInstant()
-            .toString()
+        val target = endOfLocalDay(LocalDate.now().plusDays(daysFromNow))
         scope.launch {
             AppContainer.instance.taskRepository.updateTask(taskId, dueAt = target)
-                .onSuccess { loadTask() }
                 .onFailure { error = it.message }
         }
     }
 
-    LaunchedEffect(taskId) {
-        loadTask()
-        people = AppContainer.instance.peopleRepository.getPeople().getOrDefault(emptyList())
-    }
-
     LaunchedEffect(error) {
-        error?.let { snackbarHostState.showSnackbar(it) }
+        error?.let {
+            snackbarHostState.showSnackbar(it)
+            // Se limpia para que el mismo mensaje dos veces seguidas vuelva a mostrarse.
+            error = null
+        }
     }
 
     Scaffold(
@@ -519,7 +518,6 @@ fun TaskDetailScreen(
                                                         taskId,
                                                         assignedToId = person.id
                                                     )
-                                                        .onSuccess { loadTask() }
                                                         .onFailure { error = it.message }
                                                 }
                                             }
@@ -541,7 +539,6 @@ fun TaskDetailScreen(
                                 onClick = {
                                     scope.launch {
                                         AppContainer.instance.taskRepository.skipTask(taskId)
-                                            .onSuccess { loadTask() }
                                             .onFailure { error = it.message }
                                     }
                                 },
@@ -647,7 +644,6 @@ fun TaskDetailScreen(
                         scope.launch {
                             AppContainer.instance.taskRepository.completeTask(taskId, completeNotes.ifBlank { null })
                                 .onSuccess {
-                                    loadTask()
                                     isSubmitting = false
                                 }
                                 .onFailure {
@@ -675,18 +671,16 @@ fun TaskDetailScreen(
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        val newDate = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.systemDefault())
-                            .toLocalDate()
-                            .atStartOfDay(ZoneId.systemDefault())
-                            .toInstant()
-                            .toString()
+                        // El DatePicker entrega medianoche UTC del día elegido: leerlo en la
+                        // zona local corría la fecha un día hacia atrás al oeste de UTC.
+                        val newDate = endOfLocalDay(
+                            Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        )
                         scope.launch {
                             AppContainer.instance.taskRepository.updateTask(
                                 taskId,
                                 dueAt = newDate
                             )
-                                .onSuccess { loadTask() }
                                 .onFailure { error = it.message }
                         }
                     }

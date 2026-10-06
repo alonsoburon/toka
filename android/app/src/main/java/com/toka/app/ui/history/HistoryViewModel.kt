@@ -3,6 +3,7 @@ package com.toka.app.ui.history
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.isoToLocalDate
 import com.toka.app.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -99,19 +100,14 @@ class HistoryViewModel(
             .sortedByDescending { it.count }
     }
 
-    private fun parseDate(value: String): LocalDate? =
-        try {
-            LocalDate.parse(value.substringBefore("T"))
-        } catch (_: Exception) {
-            null
-        }
+    private fun parseDate(value: String): LocalDate? = isoToLocalDate(value)
 
     private fun formatGroupKey(date: LocalDate): String {
         val today = LocalDate.now()
         val daysDiff = ChronoUnit.DAYS.between(date, today)
 
         return when {
-            daysDiff == 0L -> "Hoy"
+            daysDiff <= 0L -> "Hoy"
             daysDiff == 1L -> "Ayer"
             daysDiff in 2L..6L -> {
                 val dayName = date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale("es"))

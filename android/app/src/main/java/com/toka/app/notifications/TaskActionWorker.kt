@@ -21,12 +21,14 @@ class TaskActionWorker(
         if (taskId <= 0) return Result.failure()
 
         val repository = AppContainer.instance.taskRepository
-        when (inputData.getString(KEY_ACTION)) {
-            ACTION_COMPLETE -> repository.completeTask(taskId)
-            ACTION_SKIP -> repository.skipTask(taskId)
+        val outcome = when (inputData.getString(KEY_ACTION)) {
+            ACTION_COMPLETE -> repository.completeTask(taskId).map { }
+            ACTION_SKIP -> repository.skipTask(taskId).map { }
             else -> return Result.failure()
         }
-        return Result.success()
+        // Si la tarea ya no existe localmente (otro teléfono la resolvió y el sync la
+        // quitó) no hay nada que reintentar.
+        return if (outcome.isSuccess) Result.success() else Result.failure()
     }
 
     companion object {

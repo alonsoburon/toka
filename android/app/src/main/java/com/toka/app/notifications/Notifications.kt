@@ -27,7 +27,8 @@ object Notifications {
     private const val PREFS = "toka_reminders"
     private const val KEY = "notified"
 
-    private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
+    // "H:mm" y no "HH:mm": acepta tanto "9:00" como "09:00".
+    private val timeFormat = DateTimeFormatter.ofPattern("H:mm")
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -50,14 +51,23 @@ object Notifications {
 
         var posted = false
         for (candidate in candidates) {
-            for (raw in candidate.times) {
-                val time = runCatching { LocalTime.parse(raw, timeFormat) }.getOrNull() ?: continue
-                if (now.isBefore(time)) continue
+            // Solo la última hora ya pasada: si la tarea aparece "hoy" a las 18:00 con avisos
+            // a las 09:00 y 12:00, es un solo aviso, no una ráfaga con todas las anteriores.
+            val due = candidate.times
+                .mapNotNull { raw ->
+                    runCatching { LocalTime.parse(raw, timeFormat) }.getOrNull()?.let { raw to it }
+                }
+                .filter { (_, time) -> !now.isBefore(time) }
+                .maxByOrNull { (_, time) -> time }
+                ?: continue
+            val raw = due.first
 
-                val key = "$today-${candidate.taskId}-$raw"
-                if (key in notified) continue
+            val key = "$today-${candidate.taskId}-$raw"
+            if (key in notified) continue
 
-                post(context, candidate, raw)
+            // Si no se pudo mostrar (permiso denegado) no se marca como avisado: cuando
+            // el usuario conceda el permiso, el aviso de hoy todavía puede salir.
+            if (post(context, candidate, raw)) {
                 notified.add(key)
                 posted = true
             }
@@ -70,7 +80,10 @@ object Notifications {
         }
     }
 
-    private fun post(context: Context, candidate: ReminderCandidate, time: String) {
+    /** Devuelve true si la notificación se publicó. */
+    private fun post(context: Context, candidate: ReminderCandidate, time: String): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_TASK_ID, candidate.taskId)
@@ -89,7 +102,7 @@ object Notifications {
             actionPending(context, candidate.taskId, id + 1, id, TaskActionWorker.ACTION_SKIP)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(candidate.name)
             .setContentText(context.getString(R.string.notif_text, time))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -99,10 +112,12 @@ object Notifications {
             .addAction(0, context.getString(R.string.notif_skip_action), skipPending)
             .build()
 
-        try {
+        return try {
             NotificationManagerCompat.from(context).notify(id, notification)
+            true
         } catch (_: SecurityException) {
             // Falta el permiso POST_NOTIFICATIONS: no hay nada que hacer.
+            false
         }
     }
 

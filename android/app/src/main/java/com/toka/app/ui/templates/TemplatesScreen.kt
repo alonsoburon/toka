@@ -63,6 +63,7 @@ import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.TemplateDTO
 import com.toka.app.data.api.UpdateTemplateRequest
 import com.toka.app.data.di.AppContainer
+import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState
 import com.toka.app.ui.components.LoadingShimmer
 import com.toka.app.ui.components.PersonChip
@@ -80,7 +81,7 @@ import com.toka.app.ui.theme.TextSecondary
 fun TemplatesScreen(
     onNavigateToCreateTemplate: () -> Unit
 ) {
-    val viewModel = remember {
+    val viewModel = tokaViewModel {
         TemplatesViewModel(
             AppContainer.instance.taskRepository,
             AppContainer.instance.peopleRepository

@@ -73,6 +73,9 @@ interface TokaDao {
     @Query("DELETE FROM templates WHERE id = :id")
     suspend fun deleteTemplate(id: Long)
 
+    @Query("DELETE FROM tasks WHERE templateId = :templateId AND status = 'pending'")
+    suspend fun deletePendingTasksOfTemplate(templateId: Long)
+
     @Query("DELETE FROM people WHERE id = :id")
     suspend fun deletePerson(id: Long)
 

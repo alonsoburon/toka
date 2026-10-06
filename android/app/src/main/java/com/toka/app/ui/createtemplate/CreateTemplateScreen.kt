@@ -102,10 +102,13 @@ fun CreateTemplateScreen(
 
     val dayOptions = listOf(1, 3, 7, 14, 30, 90)
 
+    // Flow y no lectura puntual: si el primer sync llega después de abrir la pantalla, la
+    // lista de personas se llena sola en vez de quedar vacía.
     LaunchedEffect(Unit) {
-        AppContainer.instance.peopleRepository.getPeople()
-            .onSuccess { people = it; isLoadingPeople = false }
-            .onFailure { isLoadingPeople = false }
+        AppContainer.instance.peopleRepository.people.collect {
+            people = it
+            isLoadingPeople = false
+        }
     }
 
     val selectedPerson = people.find { it.id == selectedPersonId }

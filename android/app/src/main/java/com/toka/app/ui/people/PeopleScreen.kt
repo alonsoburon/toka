@@ -70,6 +70,7 @@ import com.toka.app.R
 import com.toka.app.data.api.PersonDTO
 import com.toka.app.data.api.encodeMagicInvite
 import com.toka.app.data.di.AppContainer
+import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.LoadingShimmer
 import com.toka.app.ui.theme.CardBg
 import com.toka.app.ui.theme.personColors
@@ -85,7 +86,7 @@ import com.toka.app.ui.theme.parseHexColor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PeopleScreen() {
-    val viewModel = remember { PeopleViewModel(AppContainer.instance.peopleRepository, AppContainer.instance.tokenStore) }
+    val viewModel = tokaViewModel { PeopleViewModel(AppContainer.instance.peopleRepository, AppContainer.instance.tokenStore) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val serverUrl by AppContainer.instance.tokenStore.serverUrl.collectAsState(initial = null)
     val householdName by AppContainer.instance.tokenStore.householdName.collectAsState(initial = null)

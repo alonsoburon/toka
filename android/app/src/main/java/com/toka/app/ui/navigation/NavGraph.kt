@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.createtemplate.CreateTemplateScreen
+import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.dashboard.DashboardScreen
 import com.toka.app.ui.history.HistoryScreen
 import com.toka.app.ui.onboarding.JoinHouseholdScreen
@@ -27,7 +28,7 @@ fun TokaNavGraph(
     onDeepLinkConsumed: () -> Unit = {}
 ) {
     val startDestination = if (isLoggedIn) Screen.Dashboard.route else Screen.Join.route
-    val onboardingViewModel = remember { OnboardingViewModel(AppContainer.instance.authRepository) }
+    val onboardingViewModel = tokaViewModel { OnboardingViewModel(AppContainer.instance.authRepository) }
 
     // Si se abrió desde una notificación, saltar a la tarea. Se espera a estar logueado
     // por si el aviso se toca con la sesión cerrada.

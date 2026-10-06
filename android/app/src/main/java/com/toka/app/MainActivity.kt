@@ -75,9 +75,22 @@ class MainActivity : ComponentActivity() {
                     return@TokaTheme
                 }
 
-                var loggedIn by remember { mutableStateOf(isLoggedIn == true) }
+                // La sesión es la del DataStore, sin copia local: puede terminar por fuera de la
+                // UI (el sync recibe un 401 y la cierra) y la pantalla tiene que enterarse.
+                val loggedIn = isLoggedIn == true
 
                 val navController = rememberNavController()
+
+                // Si la sesión desaparece estando dentro de la app, volver a la entrada.
+                var wasLoggedIn by remember { mutableStateOf(loggedIn) }
+                LaunchedEffect(loggedIn) {
+                    if (wasLoggedIn && !loggedIn) {
+                        navController.navigate(Screen.Join.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                    wasLoggedIn = loggedIn
+                }
                 val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
 
                 val showBottomBar = loggedIn && currentRoute in listOf(
@@ -108,8 +121,8 @@ class MainActivity : ComponentActivity() {
                         TokaNavGraph(
                             navController = navController,
                             isLoggedIn = loggedIn,
-                            onLoggedIn = { loggedIn = true },
-                            onLogout = { loggedIn = false },
+                            onLoggedIn = { },
+                            onLogout = { },
                             deepLinkTaskId = pendingTaskId.value,
                             onDeepLinkConsumed = { pendingTaskId.value = null }
                         )

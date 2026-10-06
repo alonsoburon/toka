@@ -52,6 +52,7 @@ import com.toka.app.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.data.api.TaskDTO
 import com.toka.app.data.di.AppContainer
+import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState
 import com.toka.app.ui.components.LoadingShimmer
 import com.toka.app.ui.components.TaskCard
@@ -70,7 +71,7 @@ fun DashboardScreen(
     onNavigateToTask: (Long) -> Unit,
     onNavigateToCreateTemplate: () -> Unit
 ) {
-    val viewModel = remember { DashboardViewModel(AppContainer.instance.taskRepository) }
+    val viewModel = tokaViewModel { DashboardViewModel(AppContainer.instance.taskRepository) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 

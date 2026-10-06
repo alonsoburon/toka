@@ -1,5 +1,6 @@
 package com.toka.app.data.sync
 
+import android.content.Context
 import com.toka.app.data.TokenStore
 import com.toka.app.data.api.MutationEnvelope
 import com.toka.app.data.api.PushRequest
@@ -9,14 +10,28 @@ import com.toka.app.data.local.PersonEntity
 import com.toka.app.data.local.TaskEntity
 import com.toka.app.data.local.TemplateEntity
 import com.toka.app.data.local.TokaDao
+import com.toka.app.data.suspendCatching
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import retrofit2.HttpException
+import java.io.IOException
 import java.util.UUID
+
+/** El servidor ya no reconoce el token (401): la sesión terminó y hay que volver a entrar. */
+class SessionExpiredException : Exception("sesión expirada")
+
+/** Quedaron mutaciones sin subir; no se baja nada para no pisar lo que aún no llegó. */
+class PushIncompleteException(val remaining: Int) : IOException("$remaining mutaciones sin subir")
 
 /**
  * El sincronizador.
@@ -39,10 +54,24 @@ import java.util.UUID
 class SyncEngine(
     private val api: () -> TokaApi,
     private val dao: TokaDao,
-    private val tokenStore: TokenStore
+    private val tokenStore: TokenStore,
+    /** Avisa de que los datos locales cambiaron (para redibujar el widget). */
+    private val onDataChanged: () -> Unit = {}
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val mutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Pide una sincronización ya. Corre en proceso, sin esperar a la cola de jobs del
+     * sistema (que con Doze o ventanas de batching puede tardar minutos), y deja además
+     * un SyncWorker encolado por si el proceso muere antes de terminar.
+     */
+    fun kick(context: Context) {
+        onDataChanged() // el cambio local ya está en Room: el widget no espera a la red
+        scope.launch { sync() }
+        SyncWorker.syncNow(context)
+    }
 
     /** Cuántas escrituras están esperando para subir. Para mostrarlo en la UI. */
     val pendingCount: Flow<Int> = dao.pendingCount()
@@ -72,20 +101,32 @@ class SyncEngine(
      * que quien llame decida si reintentar.
      */
     suspend fun sync(): Result<Unit> = mutex.withLock {
-        runCatching {
+        val result = suspendCatching {
             val token = tokenStore.tokenFlow.first()
-                ?: return@runCatching // sin sesión no hay nada que sincronizar
+                ?: return@suspendCatching // sin sesión no hay nada que sincronizar
             val auth = "Bearer $token"
 
             push(auth)
             pull(auth)
         }
+        if (result.isSuccess) onDataChanged()
+        val error = result.exceptionOrNull()
+        if (error is HttpException && error.code() == 401) {
+            // Un 401 no es un fallo de red que se arregle reintentando: el token ya no
+            // existe (persona borrada, servidor reiniciado). Se cierra la sesión para que
+            // la app lleve a la pantalla de entrada en vez de reintentar para siempre.
+            // El servidor elegido se conserva.
+            tokenStore.clearSession()
+            return@withLock Result.failure(SessionExpiredException())
+        }
+        result
     }
 
     private suspend fun push(auth: String) {
         while (true) {
             val batch = dao.outboxBatch(BATCH)
             if (batch.isEmpty()) return
+            var failed = 0
 
             val envelopes = batch.map {
                 MutationEnvelope(
@@ -103,10 +144,12 @@ class SyncEngine(
             for (entry in batch) {
                 val result = byId[entry.mutationId]
                 when {
-                    result == null ->
+                    result == null -> {
                         // El servidor no dijo nada de esta mutación. Se deja en la
                         // cola: reenviarla es seguro.
                         dao.markAttempt(entry.mutationId, "sin respuesta del servidor")
+                        failed++
+                    }
 
                     result.status in 200..299 || result.duplicate ->
                         dao.dequeue(entry.mutationId)
@@ -119,15 +162,37 @@ class SyncEngine(
                         // Mutación inválida o sobre algo que ya no existe. Reintentarla
                         // la dejaría atascada bloqueando todo lo que viene detrás.
                         dao.dequeue(entry.mutationId)
+                        if (entry.op == "template.create") dropProvisionalTemplate(entry)
                     }
 
-                    else ->
+                    entry.attempts + 1 >= MAX_ATTEMPTS -> {
+                        // Un 5xx que no cede tras muchos intentos bloquearía toda la cola
+                        // para siempre: se descarta esta y las demás siguen.
+                        dao.dequeue(entry.mutationId)
+                        if (entry.op == "template.create") dropProvisionalTemplate(entry)
+                    }
+
+                    else -> {
                         dao.markAttempt(entry.mutationId, "status ${result.status}")
+                        failed++
+                    }
                 }
             }
 
+            // Si algo quedó sin subir se corta aquí: el pull pisaría con la versión vieja
+            // del servidor los cambios locales que todavía no llegaron, y volver a pedir
+            // el mismo lote sin avance sería un bucle infinito.
+            if (failed > 0) throw PushIncompleteException(failed)
             if (batch.size < BATCH) return
         }
+    }
+
+    /** Una creación rechazada deja una fila provisional que ya nunca se confirmará. */
+    private suspend fun dropProvisionalTemplate(entry: OutboxEntity) {
+        val clientId = runCatching {
+            json.parseToJsonElement(entry.payloadJson).jsonObject["client_id"]?.stringOrNull()
+        }.getOrNull() ?: return
+        dao.deleteTemplate(provisionalIdFor(clientId))
     }
 
     private suspend fun pull(auth: String) {
@@ -204,10 +269,14 @@ class SyncEngine(
     fun provisionalIdFor(clientId: String): Long =
         -(clientId.hashCode().toLong() and 0x7fffffffL) - 1
 
-    suspend fun reset() = dao.clearAll()
+    /** Va bajo el mismo mutex que sync(): un ciclo en vuelo no puede reescribir lo borrado. */
+    suspend fun reset() = mutex.withLock { dao.clearAll() }
 
     private companion object {
         const val BATCH = 100
+
+        /** Intentos fallidos (5xx / sin respuesta) antes de descartar una mutación. */
+        const val MAX_ATTEMPTS = 25
     }
 }
 

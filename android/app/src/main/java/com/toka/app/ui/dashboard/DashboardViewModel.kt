@@ -32,7 +32,7 @@ class DashboardViewModel(
         // baja cambios (o cuando una escritura local aplica al instante).
         viewModelScope.launch {
             taskRepository.pendingTasks.collect { tasks ->
-                _uiState.update { it.copy(tasks = tasks, isLoading = false, error = null) }
+                _uiState.update { it.copy(tasks = tasks, isLoading = false) }
             }
         }
     }

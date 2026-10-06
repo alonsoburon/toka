@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vista previa del selector de widgets: el layout real llega vacío hasta que hay datos. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/widget_preview_title"
+        android:textColor="#D9468F"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        style="@style/WidgetTaskText"
+        android:text="@string/widget_preview_task_1" />
+
+    <TextView
+        style="@style/WidgetTaskText"
+        android:text="@string/widget_preview_task_2" />
+</LinearLayout>

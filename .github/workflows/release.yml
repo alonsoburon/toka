@@ -32,6 +32,9 @@ jobs:
           else
             VERSION="${GITHUB_REF_NAME#v}"
           fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::versión '$VERSION' no es X.Y.Z (sin sufijos)"; exit 1
+          fi
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
           CODE=$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))
@@ -55,7 +58,7 @@ jobs:
           SDKMANAGER=$(command -v sdkmanager || find "$SDK_ROOT" -name sdkmanager -type f | sort | tail -1)
           echo "sdkmanager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -63,7 +66,12 @@ jobs:
       - name: Decodificar keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::falta el secret ANDROID_KEYSTORE_BASE64; no se publica un APK sin firmar"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
 
       - name: Build APK de release
         working-directory: android
@@ -76,6 +84,11 @@ jobs:
           ./gradlew assembleRelease --no-daemon \
             -PtokaVersionName="${{ steps.version.outputs.name }}" \
             -PtokaVersionCode="${{ steps.version.outputs.code }}"
+
+      - name: Verificar firma
+        run: |
+          APKSIGNER=$(find "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools" -name apksigner | sort | tail -1)
+          "$APKSIGNER" verify --verbose android/app/build/outputs/apk/release/app-release.apk
 
       - name: Preparar asset
         run: |

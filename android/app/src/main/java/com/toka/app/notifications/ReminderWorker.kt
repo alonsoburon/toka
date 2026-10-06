@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.toka.app.data.di.AppContainer
+import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,6 +23,11 @@ class ReminderWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Sin sesión (cerrada a mano o por un 401) Room todavía guarda las tareas del
+        // hogar anterior: no hay que avisar de ellas.
+        // El widget también se redibuja aquí: es lo que lo hace cambiar de día a medianoche.
+        com.toka.app.widget.TodayWidgetProvider.refresh(applicationContext)
+        if (AppContainer.instance.tokenStore.tokenFlow.first() == null) return Result.success()
         val candidates = AppContainer.instance.taskRepository.reminderCandidates()
         Notifications.maybeNotify(applicationContext, candidates)
         return Result.success()

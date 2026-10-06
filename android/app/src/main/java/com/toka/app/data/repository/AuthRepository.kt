@@ -1,5 +1,6 @@
 package com.toka.app.data.repository
 
+import com.toka.app.data.suspendCatching
 import com.toka.app.data.TokenStore
 import com.toka.app.data.api.CreateHouseholdRequest
 import com.toka.app.data.api.CreateHouseholdResponse
@@ -24,7 +25,7 @@ class AuthRepository(
         color: String,
         emoji: String,
         householdName: String
-    ): Result<JoinHouseholdResponse> = runCatching {
+    ): Result<JoinHouseholdResponse> = suspendCatching {
         val response = api().joinHousehold(
             JoinHouseholdRequest(inviteCode, name, color, emoji)
         )
@@ -50,7 +51,7 @@ class AuthRepository(
         name: String,
         color: String,
         emoji: String
-    ): Result<CreateHouseholdResponse> = runCatching {
+    ): Result<CreateHouseholdResponse> = suspendCatching {
         val response = api().createHousehold(
             CreateHouseholdRequest(
                 name = householdName,
@@ -77,7 +78,7 @@ class AuthRepository(
      * persistente una identidad concreta: aunque se recree la base, el token del seed
      * sigue resolviendo a la misma persona.
      */
-    suspend fun loginWithToken(token: String): Result<MeResponse> = runCatching {
+    suspend fun loginWithToken(token: String): Result<MeResponse> = suspendCatching {
         val me = api().me("Bearer $token")
         tokenStore.saveSession(
             token = token,
@@ -96,7 +97,7 @@ class AuthRepository(
      * Borra la propia persona del hogar. A diferencia de cerrar sesión, el token deja
      * de existir en el servidor. Requiere conexión.
      */
-    suspend fun leaveHousehold(): Result<Unit> = runCatching {
+    suspend fun leaveHousehold(): Result<Unit> = suspendCatching {
         val householdId = tokenStore.getHouseholdId() ?: error("No hay hogar activo")
         val token = tokenStore.tokenFlow.first() ?: error("Sin sesión")
         val response = api().leaveHousehold(householdId, "Bearer $token")

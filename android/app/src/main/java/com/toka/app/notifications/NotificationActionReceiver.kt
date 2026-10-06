@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 
 /**
@@ -19,7 +20,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return
         if (taskId <= 0) return
 
+        // Expedited: el toque en el botón no debe quedar esperando a la ventana de Doze.
         val request = OneTimeWorkRequestBuilder<TaskActionWorker>()
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setInputData(
                 Data.Builder()
                     .putLong(TaskActionWorker.KEY_TASK_ID, taskId)

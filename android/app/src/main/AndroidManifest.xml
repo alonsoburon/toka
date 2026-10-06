@@ -7,12 +7,24 @@
 
     <application
         android:name=".TokaApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="Toka"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Toka"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
+
+        <receiver
+            android:name=".widget.TodayWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_info" />
+        </receiver>
 
         <activity
             android:name=".MainActivity"

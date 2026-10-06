@@ -1,6 +1,7 @@
 package com.toka.app.data.repository
 
 import android.content.Context
+import com.toka.app.data.suspendCatching
 import com.toka.app.data.TokenStore
 import com.toka.app.data.api.CreatePersonRequest
 import com.toka.app.data.api.CreatePersonResponse
@@ -37,7 +38,7 @@ class PeopleRepository(
 
     val people: Flow<List<PersonDTO>> = dao.people().map { list -> list.map { it.toDto() } }
 
-    suspend fun getPeople(): Result<List<PersonDTO>> = runCatching {
+    suspend fun getPeople(): Result<List<PersonDTO>> = suspendCatching {
         dao.peopleOnce().map { it.toDto() }
     }
 
@@ -46,7 +47,7 @@ class PeopleRepository(
         name: String? = null,
         color: String? = null,
         emoji: String? = null
-    ): Result<PersonDTO> = runCatching {
+    ): Result<PersonDTO> = suspendCatching {
         val row = dao.peopleOnce().firstOrNull { it.id == id } ?: error("person $id not found")
         val updated = row.copy(
             name = name ?: row.name,
@@ -61,18 +62,18 @@ class PeopleRepository(
             put("color", color?.let { JsonPrimitive(it) } ?: JsonNull)
             put("avatar_emoji", emoji?.let { JsonPrimitive(it) } ?: JsonNull)
         })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
 
         updated.toDto()
     }
 
     /** Borra a una persona. Es offline: se aplica local y se encola la mutación. */
-    suspend fun deletePerson(id: Long): Result<Unit> = runCatching {
+    suspend fun deletePerson(id: Long): Result<Unit> = suspendCatching {
         dao.deletePerson(id)
         sync.enqueue("person.delete", buildJsonObject {
             put("id", JsonPrimitive(id))
         })
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
     }
 
     /** Requiere conexión: el token de la persona nueva lo emite el servidor. */
@@ -81,18 +82,18 @@ class PeopleRepository(
         name: String,
         color: String,
         emoji: String
-    ): Result<CreatePersonResponse> = runCatching {
+    ): Result<CreatePersonResponse> = suspendCatching {
         val created = api().addPerson(
             householdId = householdId,
             request = CreatePersonRequest(name = name, color = color, emoji = emoji),
             token = getAuthHeader()
         )
-        SyncWorker.syncNow(appContext)
+        sync.kick(appContext)
         created
     }
 
     /** Requiere conexión: el código nuevo lo decide el servidor. */
-    suspend fun regenerateInvite(householdId: Long): Result<String> = runCatching {
+    suspend fun regenerateInvite(householdId: Long): Result<String> = suspendCatching {
         api().regenerateInvite(householdId, getAuthHeader()).inviteCode
     }
 

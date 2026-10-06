@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
         SyncStateEntity::class
     ],
     version = 1,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class TokaDatabase : RoomDatabase() {
 
@@ -30,13 +30,11 @@ abstract class TokaDatabase : RoomDatabase() {
                     TokaDatabase::class.java,
                     "toka.db"
                 )
-                    // La caché se puede reconstruir entera desde el servidor pidiendo
-                    // since=0, así que ante un cambio de esquema se descarta y se
-                    // vuelve a bajar. La excepción es la cola de salida: si hubiera
-                    // mutaciones sin subir, se perderían. Hoy es aceptable porque la
-                    // app no ha salido; en cuanto tenga usuarios, cada cambio de
-                    // esquema necesita su Migration de verdad.
-                    .fallbackToDestructiveMigration()
+                    // Un cambio de esquema necesita su Migration (con los JSON de
+                    // schemas/ para probarla). Ya hay APKs publicados, y descartar la
+                    // base destruiría la cola de salida: escrituras sin subir. Solo un
+                    // downgrade —que no tiene migración posible— reconstruye la caché.
+                    .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                     .also { instance = it }
             }

@@ -107,6 +107,20 @@ fun JoinHouseholdScreen(
     val colors = personColors()
     val context = LocalContext.current
     val invalidCodeMessage = stringResource(R.string.onboarding_invalid_code)
+    // Mientras se cambia de servidor (antes de que el ViewModel pase a Loading) el botón
+    // seguiría activo: un doble toque lanzaba dos createHousehold.
+    var connecting by remember { mutableStateOf(false) }
+
+    /** Apunta la app a `target`; si falla avisa y devuelve false. */
+    suspend fun connectTo(target: String): Boolean {
+        val result = AppContainer.instance.reconnect(target)
+        result.onFailure {
+            snackbarHostState.showSnackbar(
+                context.getString(R.string.onboarding_connect_error, it.message ?: "")
+            )
+        }
+        return result.isSuccess
+    }
 
     val emojis = listOf(
         "🐱", "🐶", "🦊", "🐸", "🐼", "🐨", "🐰", "🐯", "🐮",
@@ -360,24 +374,30 @@ fun JoinHouseholdScreen(
                 onClick = {
                     when (mode) {
                         EntryMode.Token -> scope.launch {
-                            val target = server.trim()
-                            withContext(Dispatchers.IO) {
-                                if (target.isNotBlank()) AppContainer.instance.reconnect(target)
+                            connecting = true
+                            try {
+                                val target = server.trim()
+                                if (target.isNotBlank() && !connectTo(target)) return@launch
+                                viewModel.loginWithToken(token)
+                            } finally {
+                                connecting = false
                             }
-                            viewModel.loginWithToken(token)
                         }
 
                         EntryMode.Create -> scope.launch {
-                            val target = server.trim()
-                            withContext(Dispatchers.IO) {
-                                if (target.isNotBlank()) AppContainer.instance.reconnect(target)
+                            connecting = true
+                            try {
+                                val target = server.trim()
+                                if (target.isNotBlank() && !connectTo(target)) return@launch
+                                viewModel.createHousehold(
+                                    householdName = householdName,
+                                    name = userName,
+                                    color = personColorToHex(colors[selectedColor]),
+                                    emoji = selectedEmoji
+                                )
+                            } finally {
+                                connecting = false
                             }
-                            viewModel.createHousehold(
-                                householdName = householdName,
-                                name = userName,
-                                color = personColorToHex(colors[selectedColor]),
-                                emoji = selectedEmoji
-                            )
                         }
 
                         EntryMode.Join -> {
@@ -388,10 +408,9 @@ fun JoinHouseholdScreen(
                             }
                             val colorHex = personColorToHex(colors[selectedColor])
                             scope.launch {
+                                connecting = true
                                 try {
-                                    withContext(Dispatchers.IO) {
-                                        AppContainer.instance.reconnect(invite.server)
-                                    }
+                                    if (!connectTo(invite.server)) return@launch
                                     viewModel.joinHousehold(
                                         inviteCode = invite.code,
                                         name = userName,
@@ -399,16 +418,14 @@ fun JoinHouseholdScreen(
                                         emoji = selectedEmoji,
                                         householdName = invite.household
                                     )
-                                } catch (e: Exception) {
-                                    snackbarHostState.showSnackbar(
-                                        context.getString(R.string.onboarding_connect_error, e.message)
-                                    )
+                                } finally {
+                                    connecting = false
                                 }
                             }
                         }
                     }
                 },
-                enabled = canSubmit && state !is OnboardingUiState.Loading,
+                enabled = canSubmit && !connecting && state !is OnboardingUiState.Loading,
                 colors = ButtonDefaults.buttonColors(containerColor = Pink),
                 modifier = Modifier
                     .fillMaxWidth()
