@@ -73,6 +73,18 @@ guardado en los secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD`; además necesita `GOOGLE_SERVICES_JSON_BASE64`
 (el `google-services.json` real) y falla si falta.
 
+### Segundo canal: F-Droid privado "Nuxapower Apps"
+
+El mismo APK firmado también se publica en el repo F-Droid privado (`~/code/nuxapower-apps`), igual que Finanzas:
+
+```bash
+cd android && ./gradlew assembleRelease -PtokaVersionName=0.3.0 -PtokaVersionCode=300   # versión del tag, no la de desarrollo
+scripts/publicar-apk.sh                                                                    # sube al repo y verifica el índice
+```
+
+Los dos canales (Obtainium y F-Droid) deben servir **el mismo APK** (misma firma y mismo `versionCode`) para que
+se actualicen entre sí sin reinstalar. La metadata vive en `nuxapower-apps/metadata/com.toka.app.yml`.
+
 **Guarda `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
 Son la única forma de firmar actualizaciones que Android acepte como del mismo
 desarrollador; si se pierden, hay que desinstalar y reinstalar. El APK de release y el de
