@@ -93,7 +93,9 @@ fun DocumentSnapshot.toTemplate() = TemplateDTO(
     recurrenceDays = getLong("recurrenceDays")?.toInt(),
     preferredAssigneeId = getString("preferredAssigneeId"),
     reminderTimes = getString("reminderTimes"),
-    isActive = getBoolean("isActive") ?: true
+    isActive = getBoolean("isActive") ?: true,
+    triggerTemplateId = getString("triggerTemplateId"),
+    triggerDelayDays = getLong("triggerDelayDays")?.toInt()
 )
 
 /** La asignada y quien completó se resuelven contra la lista de personas del hogar. */
@@ -128,3 +130,6 @@ fun DocumentSnapshot.toTask(people: Map<String, PersonDTO>): TaskDTO {
 fun nextTaskId(taskId: String): String =
     "n" + MessageDigest.getInstance("SHA-256").digest(taskId.toByteArray())
         .joinToString("") { "%02x".format(it) }.take(24)
+
+/** Id de la tarea que [followerTemplateId] genera al completar [taskId]; determinista como [nextTaskId]. */
+fun followUpTaskId(taskId: String, followerTemplateId: String): String = nextTaskId("$taskId:$followerTemplateId")

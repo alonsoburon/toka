@@ -68,6 +68,7 @@ import com.toka.app.data.model.CreateTemplateRequest
 import com.toka.app.ui.components.ReminderTimesField
 import com.toka.app.ui.components.normalizeReminders
 import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.model.TemplateDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.theme.CardBg
 import com.toka.app.ui.theme.Pink
@@ -91,6 +92,9 @@ fun CreateTemplateScreen(
     var customDaysInput by remember { mutableStateOf("") }
     var showCustomDialog by remember { mutableStateOf(false) }
     var selectedPersonId by remember { mutableStateOf<String?>(null) }
+    var triggerId by remember { mutableStateOf<String?>(null) }
+    var triggerDelay by remember { mutableIntStateOf(0) }
+    var templates by remember { mutableStateOf<List<TemplateDTO>>(emptyList()) }
 
     var people by remember { mutableStateOf<List<PersonDTO>>(emptyList()) }
     var isLoadingPeople by remember { mutableStateOf(true) }
@@ -109,6 +113,10 @@ fun CreateTemplateScreen(
             people = it
             isLoadingPeople = false
         }
+    }
+
+    LaunchedEffect(Unit) {
+        AppContainer.instance.taskRepository.templates.collect { templates = it }
     }
 
     val selectedPerson = people.find { it.id == selectedPersonId }
@@ -217,7 +225,7 @@ fun CreateTemplateScreen(
                 }
             }
 
-            if (isRecurring) {
+            if (isRecurring && triggerId == null) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
@@ -259,6 +267,69 @@ fun CreateTemplateScreen(
                                 selectedLabelColor = Pink
                             )
                         )
+                    }
+                }
+            }
+
+            if (templates.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = stringResource(R.string.create_trigger_label),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextPrimary
+                )
+                Text(
+                    text = stringResource(R.string.create_trigger_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = triggerId == null,
+                            onClick = { triggerId = null },
+                            label = { Text(stringResource(R.string.create_trigger_none)) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Pink.copy(alpha = 0.15f),
+                                selectedLabelColor = Pink
+                            )
+                        )
+                    }
+                    items(templates) { t ->
+                        FilterChip(
+                            selected = triggerId == t.id,
+                            onClick = { triggerId = t.id; isRecurring = false },
+                            label = { Text(t.name) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Pink.copy(alpha = 0.15f),
+                                selectedLabelColor = Pink
+                            )
+                        )
+                    }
+                }
+                if (triggerId != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.create_trigger_delay),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(listOf(0, 1, 2, 3, 7)) { d ->
+                            FilterChip(
+                                selected = triggerDelay == d,
+                                onClick = { triggerDelay = d },
+                                label = {
+                                    Text(if (d == 0) stringResource(R.string.create_trigger_same_day) else "+$d")
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Pink.copy(alpha = 0.15f),
+                                    selectedLabelColor = Pink
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -410,7 +481,9 @@ fun CreateTemplateScreen(
                                 description = description.ifBlank { null },
                                 recurrenceDays = recurringDays,
                                 preferredAssigneeId = selectedPersonId,
-                                reminderTimes = normalizeReminders(reminderInput)
+                                reminderTimes = normalizeReminders(reminderInput),
+                                triggerTemplateId = triggerId,
+                                triggerDelayDays = triggerId?.let { triggerDelay }
                             )
                         )
                             .onSuccess { onNavigateBack() }

@@ -87,7 +87,8 @@ service cloud.firestore {
       match /templates/{tid} {
         function plantillaValida(d) {
           return d.keys().hasOnly(['name', 'description', 'recurrenceDays', 'preferredAssigneeId',
-                                   'reminderTimes', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+                                   'reminderTimes', 'isActive', 'triggerTemplateId', 'triggerDelayDays',
+                                   'createdBy', 'createdAt', 'updatedAt'])
             && d.keys().hasAll(['name', 'isActive'])
             && texto(d.name, 120) && d.name.size() > 0
             && textoONulo(d.get('description', null), 2000)
@@ -97,6 +98,10 @@ service cloud.firestore {
             && (d.get('preferredAssigneeId', null) == null
                 || (d.preferredAssigneeId is string && miembroFuturo(hid, d.preferredAssigneeId)))
             && textoONulo(d.get('reminderTimes', null), 120)
+            // Encadenada: nace al completar otra plantilla, N días después (0..365).
+            && textoONulo(d.get('triggerTemplateId', null), 64)
+            && (d.get('triggerDelayDays', null) == null
+                || (d.triggerDelayDays is int && d.triggerDelayDays >= 0 && d.triggerDelayDays <= 365))
             && d.isActive is bool;
         }
         allow read: if esMiembro(hid);

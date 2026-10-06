@@ -33,7 +33,7 @@ aplican a él. Para correrlo: `make run` / `make run-seed` (desde la raíz; lee 
 ## Comandos
 
 ```bash
-scripts/test-rules.sh        # 50 comprobaciones de firestore.rules con emulador propio
+scripts/test-rules.sh        # 54 comprobaciones de firestore.rules con emulador propio
 scripts/dev.sh               # emuladores Firebase + emulador Android + instala "Toka DEV"
 scripts/dev.sh --sin-compilar   # idem sin recompilar
 scripts/dev.sh --parar       # detiene los emuladores de Toka (por PID)
@@ -55,7 +55,8 @@ invites/{code}                   { householdId }     código de 6 chars [A-Z0-9]
 households/{hid}                 { name, inviteCode, members[<=10], createdBy, createdAt }
 households/{hid}/people/{uid}    { name, color, emoji }                 id = uid del miembro
 households/{hid}/templates/{id}  { name, description, recurrenceDays, preferredAssigneeId,
-                                   reminderTimes, isActive, createdBy, createdAt, updatedAt }
+                                   reminderTimes, isActive, triggerTemplateId, triggerDelayDays,
+                                   createdBy, createdAt, updatedAt }
 households/{hid}/tasks/{id}      { templateId, templateName, status pending|done|skipped, dueAt (Timestamp),
                                    assignedToId, completedById, completedAt, notes, generatedFrom,
                                    createdBy, createdAt, updatedAt }
@@ -111,8 +112,13 @@ La recurrencia vive en el cliente, `TaskRepository.resolve`:
   original (no punitivo);
 - se asigna a `preferredAssigneeId` (puede ser null);
 - si la plantilla está inactiva o `recurrenceDays` es null (una sola vez), no se crea nada;
+- **flujos**: una plantilla con `triggerTemplateId` (+ `triggerDelayDays` 0..365) no se agenda sola; al
+  **completar** (no saltar) una tarea de la plantilla disparadora, el mismo lote crea su tarea con
+  `dueAt = completado + triggerDelayDays` e id `followUpTaskId(taskId, templateId)` (determinista).
+  Se encadenan: A → B → C. Se crean desde "Se crea al completar otra tarea" al crear la plantilla;
 - **deshacer** vuelve la tarea a `pending` y borra la siguiente si sigue pendiente;
 - **borrar plantilla** = `isActive=false` + borrar sus tareas pendientes (el historial se conserva).
+- deshacer también borra las tareas encadenadas que disparó, mientras sigan pendientes.
 
 ## Recordatorios y widget
 

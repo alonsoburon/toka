@@ -25,7 +25,11 @@ data class TemplateDTO(
     val recurrenceDays: Int? = null,
     val preferredAssigneeId: String? = null,
     val reminderTimes: String? = null,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    /** Si no es null, esta plantilla no se agenda sola: nace al completar una tarea de [triggerTemplateId]. */
+    val triggerTemplateId: String? = null,
+    /** Días después del completado en que vence la tarea disparada (0 = el mismo día). */
+    val triggerDelayDays: Int? = null
 )
 
 data class TaskDTO(
@@ -53,7 +57,9 @@ data class CreateTemplateRequest(
     val description: String? = null,
     val recurrenceDays: Int? = null,
     val preferredAssigneeId: String? = null,
-    val reminderTimes: String? = null
+    val reminderTimes: String? = null,
+    val triggerTemplateId: String? = null,
+    val triggerDelayDays: Int? = null
 )
 
 /** Campos en null = no tocar. */

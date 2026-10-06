@@ -12,6 +12,7 @@ import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.Source
 import com.toka.app.data.SessionCache
 import com.toka.app.data.firebase.asFlow
+import com.toka.app.data.firebase.followUpTaskId
 import com.toka.app.data.firebase.nextTaskId
 import com.toka.app.data.firebase.retryOnPermissionDenied
 import com.toka.app.data.firebase.tasks
@@ -154,6 +155,23 @@ class TaskRepository(
                     ) + ("generatedFrom" to taskId)
                 )
             }
+            // Flujos: completar (no saltar) dispara las plantillas encadenadas a esta, con id determinista.
+            if (newStatus == "done" && template != null) {
+                followers(hid, template.id).forEach { f ->
+                    val delay = f.getLong("triggerDelayDays") ?: 0L
+                    batch.set(
+                        db.tasks(hid).document(followUpTaskId(taskId, f.id)),
+                        taskData(
+                            templateId = f.id,
+                            templateName = f.getString("name"),
+                            dueAt = Timestamp(now.seconds + delay * 86_400L, now.nanoseconds),
+                            assignedToId = f.getString("preferredAssigneeId"),
+                            uid = uid,
+                            now = now
+                        ) + ("generatedFrom" to taskId)
+                    )
+                }
+            }
             send(batch.commit(), "resolver $taskId")
             CompleteTaskResponse(status = newStatus, nextDueAt = nextDue?.toIso())
         }
@@ -171,6 +189,14 @@ class TaskRepository(
         val batch = db.batch()
         batch.update(taskRef, mapOf("status" to "pending", "completedById" to null, "completedAt" to null, "updatedAt" to now))
         if (next != null && next.getString("status") == "pending") batch.delete(nextRef)
+        // También las tareas encadenadas que disparó, mientras sigan pendientes.
+        val templateId = fetch(taskRef)?.getString("templateId")
+        if (templateId != null) {
+            followers(hid, templateId).forEach { f ->
+                val ref = db.tasks(hid).document(followUpTaskId(taskId, f.id))
+                if (fetch(ref)?.getString("status") == "pending") batch.delete(ref)
+            }
+        }
         send(batch.commit(), "deshacer $taskId")
     }
 
@@ -205,18 +231,23 @@ class TaskRepository(
                 "recurrenceDays" to days,
                 "preferredAssigneeId" to preferred,
                 "reminderTimes" to request.reminderTimes?.takeIf { it.isNotBlank() },
+                "triggerTemplateId" to request.triggerTemplateId,
+                "triggerDelayDays" to request.triggerTemplateId?.let { request.triggerDelayDays ?: 0 },
                 "isActive" to true,
                 "createdBy" to uid,
                 "createdAt" to now,
                 "updatedAt" to now
             )
         )
-        // La primera instancia vence en la recurrencia (o en 7 días si es de una sola vez).
-        val due = Timestamp(now.seconds + (days ?: DEFAULT_DUE_DAYS) * 86_400L, now.nanoseconds)
-        batch.set(
-            db.tasks(hid).document(),
-            taskData(templateRef.id, request.name.trim(), due, preferred, uid, now)
-        )
+        // La primera instancia vence en la recurrencia (o en 7 días si es de una sola vez). Una plantilla
+        // encadenada no la tiene: nace cuando se completa la tarea que la dispara.
+        if (request.triggerTemplateId == null) {
+            val due = Timestamp(now.seconds + (days ?: DEFAULT_DUE_DAYS) * 86_400L, now.nanoseconds)
+            batch.set(
+                db.tasks(hid).document(),
+                taskData(templateRef.id, request.name.trim(), due, preferred, uid, now)
+            )
+        }
         send(batch.commit(), "crear plantilla")
         TemplateDTO(
             id = templateRef.id,
@@ -225,7 +256,9 @@ class TaskRepository(
             recurrenceDays = days,
             preferredAssigneeId = preferred,
             reminderTimes = request.reminderTimes,
-            isActive = true
+            isActive = true,
+            triggerTemplateId = request.triggerTemplateId,
+            triggerDelayDays = request.triggerTemplateId?.let { request.triggerDelayDays ?: 0 }
         )
     }
 
@@ -344,6 +377,17 @@ class TaskRepository(
     private suspend fun renamePending(batch: com.google.firebase.firestore.WriteBatch, hid: String, templateId: String, name: String) {
         val pending = queryOnce(db.tasks(hid).whereEqualTo("templateId", templateId).whereEqualTo("status", "pending"))
         pending.documents.forEach { batch.update(it.reference, mapOf("templateName" to name, "updatedAt" to Timestamp.now())) }
+    }
+
+    /** Plantillas activas encadenadas a [templateId]. Cache primero: completar no debe esperar a la red. */
+    private suspend fun followers(hid: String, templateId: String): List<DocumentSnapshot> {
+        val query = db.templates(hid).whereEqualTo("triggerTemplateId", templateId)
+        val snap = try {
+            query.get(Source.CACHE).await()
+        } catch (_: FirebaseFirestoreException) {
+            queryOnce(query)
+        }
+        return snap.documents.filter { it.getBoolean("isActive") != false }
     }
 
     private fun taskData(

@@ -196,4 +196,9 @@
     <string name="widget_signed_out">Abre Toka para entrar</string>
     <string name="widget_more">+%1$d más</string>
     <string name="notif_text">Pendiente · aviso de las %1$s</string>
+    <string name="create_trigger_label">Se crea al completar otra tarea</string>
+    <string name="create_trigger_hint">Para flujos: al completar la elegida, esta aparece sola.</string>
+    <string name="create_trigger_none">Ninguna</string>
+    <string name="create_trigger_delay">¿Cuándo vence?</string>
+    <string name="create_trigger_same_day">El mismo día</string>
 </resources>

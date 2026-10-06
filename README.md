@@ -25,7 +25,7 @@ Requiere Android SDK, Java 21+ (para los emuladores de Firebase) y `npx`.
 
 ```bash
 scripts/dev.sh            # emuladores Firebase + emulador Android + instala "Toka DEV"
-scripts/test-rules.sh     # prueba firestore.rules (50 comprobaciones, emulador propio)
+scripts/test-rules.sh     # prueba firestore.rules (54 comprobaciones, emulador propio)
 cd android && ./gradlew compileDebugKotlin
 ```
 

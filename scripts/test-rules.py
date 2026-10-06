@@ -189,6 +189,14 @@ def main():
     check("sin recurrencia ni preferido (una sola vez)", ana.commit(
         doc(f"households/{hid}/templates/t4", {"name": "Una vez", "isActive": True, "recurrenceDays": None,
                                                "preferredAssigneeId": None})))
+    chain = {"name": "Colgar", "isActive": True, "recurrenceDays": None, "triggerTemplateId": "t1", "triggerDelayDays": 2}
+    check("plantilla encadenada válida", ana.commit(doc(f"households/{hid}/templates/t5", chain)))
+    check("encadenada con retraso negativo denegada", ana.commit(
+        doc(f"households/{hid}/templates/t6", {**chain, "triggerDelayDays": -1})), False)
+    check("encadenada con retraso 366 denegada", ana.commit(
+        doc(f"households/{hid}/templates/t6", {**chain, "triggerDelayDays": 366})), False)
+    check("encadenada con disparador no texto denegada", ana.commit(
+        doc(f"households/{hid}/templates/t6", {**chain, "triggerTemplateId": 5})), False)
     check("las plantillas no se borran", ana.commit(delete(f"households/{hid}/templates/t1")), False)
 
     print("Tareas")
