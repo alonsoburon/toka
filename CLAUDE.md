@@ -1,263 +1,166 @@
 # Toka
 
 App de tareas domésticas compartidas: un *household* con varias *people*, plantillas
-de tarea recurrentes (`task_templates`) que generan instancias (`task_instances`).
+de tarea recurrentes (`templates`) que generan instancias (`tasks`).
 
 **Idioma:** responde en español. El código, los identificadores y los commits van en inglés.
 
-## Stack
+## Arquitectura vigente
+
+Android (Kotlin + Compose) habla **directo con Firebase**: Firebase Auth (Google) y
+Firestore. No hay servidor propio en el flujo vigente. Misma arquitectura que la app
+Finanzas (`~/code/personal_finance`).
 
 | Capa | Tecnología |
 |------|-----------|
-| Backend | Go 1.26, stdlib `net/http` (routing 1.22+), `database/sql` + `modernc.org/sqlite` (puro Go, sin CGO) |
-| DB | SQLite: un solo archivo (`TOKA_DB`, por defecto `toka.db`). Sin daemon ni roles |
-| Android | Kotlin 2.3 + Compose (BOM 2026.03), AGP 8.13, Retrofit, Room (SQLite local), WorkManager, minSdk 33 / targetSdk 36 |
+| Cliente | Kotlin 2.3.21, AGP 8.13.2, Compose BOM 2026.03.01, minSdk 33 |
+| Auth | Firebase Auth + Google vía Credential Manager 1.6.0 + googleid 1.2.1 |
+| Datos | Firestore (BOM 34.19.0, auth + firestore), caché persistente offline; coroutines-play-services |
+| Segundo plano | WorkManager 2.12.0 (recordatorios), widget RemoteViews |
+| Reglas | `firestore.rules` — única frontera entre hogares |
+
+Ya **no** hay Retrofit, Room, KSP, kotlinx-serialization ni DataStore.
+
+## Backend Go + SQLite (legado, a retirar tras migrar)
+
+`main.go`, `internal/`, `db/`, `Containerfile`, `deploy/`, `Makefile`, `.claude/scripts/smoke*.sh`
+siguen en el repo y en producción (`https://toka.nuxapower.cl`, VPS OVH con Podman + Quadlet)
+**hasta que se migren los datos y se retire**. No se le añaden features; solo se opera
+(deploy, respaldo, rotación de credenciales: ver `README.md` y `deploy/`). Las skills
+`/migration`, `/endpoint`, `/smoke` y el comando `/schema` describen ese backend y solo
+aplican a él. Para correrlo: `make run` / `make run-seed` (desde la raíz; lee `db/` del disco).
 
 ## Comandos
 
 ```bash
-make run         # copia .env si falta y sirve en :3000 (migra al arrancar)
-make run-seed    # migra + carga db/seed.sql (idempotente). SOLO DEV: hogar "Demo" con token público
-make smoke       # smoke tests contra una base temporal (no toca toka.db)
-make build       # compila ./toka
-make db-reset    # borra toka.db y lo recrea con seed  ⚠️ destruye datos
-make curl-setup  # imprime el cheat-sheet de curl de todos los endpoints
+scripts/test-rules.sh        # 50 comprobaciones de firestore.rules con emulador propio
+scripts/dev.sh               # emuladores Firebase + emulador Android + instala "Toka DEV"
+scripts/dev.sh --sin-compilar   # idem sin recompilar
+scripts/dev.sh --parar       # detiene los emuladores de Toka (por PID)
+scripts/publicar-reglas.sh   # publica firestore.rules en toka-hogar-e194
+cd android && ./gradlew compileDebugKotlin   # verificación rápida de tipos
+cd android && ./gradlew assembleDebug        # APK debug
 ```
 
-El servidor **lee `db/migrations/` y `db/seed.sql` desde el disco en runtime**
-(`os.ReadDir`/`os.ReadFile`), así que hay que ejecutarlo desde la raíz del repo.
+**Emuladores:** los de Toka usan Auth `9199` / Firestore `8185` / UI `4100`. Finanzas usa
+`9099` / `8085`. **Nunca compartas ni mates el emulador de Finanzas: nada de `pkill -f`**;
+los scripts detienen por PID/grupo de proceso. Necesitan Java 21+ y `npx`.
+`dev.sh` con teléfono real: `DISPOSITIVO=<serial> scripts/dev.sh` (usa `-Ptoka.emulador=<ip>`).
 
-Tests: `go test ./...` (HTTP real con `httptest` sobre una SQLite temporal, en `internal/server`).
-
-Despliegue y respaldo: `Containerfile`, `deploy/` (timer + scripts de respaldo y restauración) y la
-sección "Servidor en producción" del README. **Nunca cargues `db/seed.sql` en producción**: el repo es
-público y el token/invite del seed son conocidos.
-
-Android: `cd android && ./gradlew assembleDebug`. La URL del backend se configura en
-la pantalla "Conectar al servidor"; `BASE_URL` en `android/app/build.gradle.kts` es
-solo el valor por defecto.
-
-## Estructura
+## Modelo de datos (Firestore)
 
 ```
-main.go                     flags (-seed, -port, -migrate-only, -env), connect → migrate → seed → listen
-internal/db/db.go           Connect, Migrate (tabla _migrations), Seed
-internal/db/version.go      NextRowVersion (contador de sincronización)
-internal/server/server.go   ÚNICA fuente de verdad del routing
-internal/auth/auth.go       middleware Bearer, ctx keys, RequireAuth
-internal/handler/           Server{DB *sql.DB} + un archivo por recurso
-internal/model/models.go    structs con tags json
-db/migrations/NNN_name.{up,down}.sql
+users/{uid}                      { householdId }
+invites/{code}                   { householdId }     código de 6 chars [A-Z0-9]; se consulta (get), nunca se lista
+households/{hid}                 { name, inviteCode, members[<=10], createdBy, createdAt }
+households/{hid}/people/{uid}    { name, color, emoji }                 id = uid del miembro
+households/{hid}/templates/{id}  { name, description, recurrenceDays, preferredAssigneeId,
+                                   reminderTimes, isActive, createdBy, createdAt, updatedAt }
+households/{hid}/tasks/{id}      { templateId, templateName, status pending|done|skipped, dueAt (Timestamp),
+                                   assignedToId, completedById, completedAt, notes, generatedFrom,
+                                   createdBy, createdAt, updatedAt }
+```
+
+Todos los ids de persona son `String` (uid de Firebase), nunca `Int`/`Long`. Rutas en Kotlin:
+`data/firebase/Firestore.kt` (`user`, `invite`, `household`, `people`, `templates`, `tasks`).
+`reminderTimes` es `"HH:MM,HH:MM"` en hora local del teléfono.
+
+## Reglas de seguridad: dónde vive el aislamiento
+
+**Entre hogares lo aplican las reglas (`firestore.rules`), no código de servidor.** Un cliente
+modificado puede intentar cualquier escritura; solo las reglas lo frenan. Lo que validan:
+
+- `users/{uid}`: cada uno solo el suyo, únicamente `householdId`.
+- `invites/{code}`: `get` para cualquier logueado, `list`/`update` prohibidos; crear exige ser miembro
+  del hogar destino (tras el lote) y código válido; borrar, ser miembro.
+- `households`: leer solo miembros. Crear con `members == [uid]`. Update en cuatro formas:
+  unirse (solo agregarte, máx. 10), salir (solo quitarte), regenerar `inviteCode`, renombrar. Sin delete.
+- `people/{pid}`: `pid == uid`, perfil acotado (nombre ≤40, color `#RRGGBB`, emoji ≤16).
+- `templates`: `preferredAssigneeId` debe ser miembro del hogar; `recurrenceDays` 1..3650; sin delete
+  (se da de baja con `isActive=false`).
+- `tasks`: `assignedToId` debe ser miembro; `pending` no lleva `completedById/At`; resuelta debe
+  llevar `completedById == uid` y `completedAt`; una resuelta solo vuelve a `pending` tocando los
+  campos de resolución (`reabrirValido`); solo se borran las `pending`.
+
+Se prueban con `scripts/test-rules.sh`. **Cada cambio en reglas, modelo o escrituras del
+cliente se acompaña de su comprobación ahí**, y las reglas se publican con
+`scripts/publicar-reglas.sh` (pedirlo, no hacerlo por iniciativa).
+
+## Sesión y onboarding
+
+`SessionRepository` (Auth + `users/{uid}`) emite `Session.{Loading, SignedOut, NoHousehold,
+InHousehold, Failed}`; `MainActivity` elige `LoginScreen` / `HouseholdSetupScreen` / la app.
+`SessionCache` (SharedPreferences) entrega `uid`/`householdId` de forma síncrona a workers y widget.
+
+**Unirse a un hogar es en dos pasos** (primero `members` + perfil en `people`, luego `users/{uid}`)
+para evitar una carrera de permisos. Los listeners que pueden abrirse justo tras crear/unirse
+usan `retryOnPermissionDenied` (un listener con `PERMISSION_DENIED` muere para siempre).
+
+## Escrituras, offline y recurrencia
+
+Firestore guarda las escrituras en su caché persistente y las sube solo. **Las escrituras no
+esperan la red**: nunca hagas `await()` de una escritura en la UI o el ViewModel (con el avión
+activado nunca resolvería). El indicador ⟳ N cuenta documentos con `metadata.hasPendingWrites()`.
+
+La recurrencia vive en el cliente, `TaskRepository.resolve`:
+
+- al completar/saltar, **el mismo `WriteBatch`** actualiza la tarea y crea la siguiente;
+- id de la siguiente: `nextTaskId(taskId)` (hash SHA-256 truncado, determinista), así dos teléfonos
+  offline que completan lo mismo escriben el mismo documento y no se duplica;
+- `dueAt = <momento de completar> + recurrenceDays` — desde el completado, no desde el vencimiento
+  original (no punitivo);
+- se asigna a `preferredAssigneeId` (puede ser null);
+- si la plantilla está inactiva o `recurrenceDays` es null (una sola vez), no se crea nada;
+- **deshacer** vuelve la tarea a `pending` y borra la siguiente si sigue pendiente;
+- **borrar plantilla** = `isActive=false` + borrar sus tareas pendientes (el historial se conserva).
+
+## Recordatorios y widget
+
+`ReminderWorker` (WorkManager, cada 15 min) avisa de tareas pendientes que vencen **hoy** a cada
+hora de `reminderTimes` ya pasada, con dedupe diario en SharedPreferences; un aviso de las 09:00
+puede salir hasta 09:14. El widget "Mis tareas de hoy" (`TodayWidgetProvider`, RemoteViews) y los
+workers leen de la **caché de Firestore** vía `SessionCache`. Son notificaciones locales: no hay FCM.
+
+## Builds, entornos y Firebase real
+
+- **Debug:** `applicationId` `com.toka.app.dev` ("Toka DEV"). Usa los emuladores (`EMULATOR_HOST`
+  `10.0.2.2`; `-Ptoka.emulador=<ip>` para teléfono en LAN) y muestra "Entrar como Ana/Beto (dev)".
+- **Release:** `com.toka.app`; necesita `android/app/google-services.json` real (gitignoreado).
+  En CI sale del secret `GOOGLE_SERVICES_JSON_BASE64` (`.github/workflows/release.yml`, falla si falta),
+  además de los secrets del keystore.
+- **Proyecto Firebase:** `toka-hogar-e194` (cuenta nuxapower@gmail.com), Firestore en
+  `southamerica-west1`, plan Spark. Checklist de consola pendiente en `README.md`.
+
+## Estructura (Android)
+
+```
 android/app/src/main/java/com/toka/app/
-    data/api/               TokaApi (Retrofit) + ApiModels (DTOs)
-    data/repository/        un repo por dominio
-    ui/<feature>/           Screen + ViewModel por feature
+  data/firebase/     Firestore.kt (rutas, asFlow, retryOnPermissionDenied, mapeo, nextTaskId), FirebaseSetup.kt
+  data/repository/   AuthRepository, HouseholdRepository, SessionRepository, TaskRepository
+  data/di/           AppContainer (inyección manual)
+  data/              SessionCache, Dates, Results; model/Models.kt (DTOs)
+  ui/<feature>/      Screen + ViewModel por feature; ui/navigation, ui/components, ui/theme
+  notifications/     ReminderWorker, TaskActionWorker, Notifications
+  widget/            TodayWidgetProvider
+firestore.rules  firebase.json  scripts/{dev,test-rules,publicar-reglas}.sh
 ```
-
-## Auth: dónde vive cada cosa
-
-**Entrar a la base** ya no tiene capas: SQLite es un archivo y el proceso entra
-directo. `TOKA_DB` elige la ruta (default `toka.db`).
-
-**Aislamiento entre households** lo aplica **el código Go**: cada query filtra por
-`household_id`. Antes lo garantizaba RLS en Postgres (migración 002, ya no existe);
-al migrar a SQLite esa frontera volvió a ser disciplina del SQL. **Toda query
-autenticada filtra por `household_id`** — olvidarla es una fuga entre familias.
-
-`auth.Middleware` resuelve el Bearer token a una persona con una lectura por
-`token_hash` (único global) y deja `Person` y `HouseholdID` en el contexto.
-`auth.RequireAuth(w, r)` es lo que usan los handlers; devuelve `(person, hid, ok)`.
-
-**Tokens** — `people.token_hash` guarda sha256; el token en claro solo existe en la
-respuesta que se le entrega al cliente. Se generan con `crypto/rand`
-(`auth.NewToken`, `auth.NewInviteCode`), nunca con `math/rand`.
-
-## Sincronización offline
-
-El cliente Android es local-first: la UI lee de SQLite (Room) y nunca espera a la red.
-
-**Servidor** (migración 002, `internal/handler/sync.go`):
-
-- `GET /sync?since=N` → todo lo que cambió después del cursor N, más el cursor nuevo.
-- `POST /sync/mutations` → la cola de escrituras del cliente.
-
-`row_version` sale de un contador global (`sync_counter`) que se incrementa con
-`UPDATE ... RETURNING` desde `db.NextRowVersion`, **dentro de la misma transacción
-que la escritura**. No es una secuencia: una secuencia reparte números antes del
-COMMIT y dos transacciones podrían confirmar en orden inverso, haciendo que un
-cliente se salte una fila para siempre. El contador lo garantiza, y SQLite además
-serializa las escrituras de todos modos. **Toda escritura en `people`,
-`task_templates` o `task_instances` debe asignar `row_version = NextRowVersion(...)`
-y, si es un UPDATE, actualizar `updated_at` a mano** (SQLite no tiene el trigger
-`set_updated_at()` de Postgres).
-
-**Plantillas creadas offline:** el cliente las muestra con un id negativo; mientras la creación sigue en la cola,
-`template.update` / `template.set_recurrence` / `template.delete` llevan además `client_id` y el servidor resuelve
-el id real (`resolveTemplateID`). La dedupe de `mutation_id` filtra por household, y `sync_mutations` se poda a
-los 90 días (`db.PruneMutations`, al arrancar y cada 24 h).
-
-**Deduplicación, dos capas independientes:**
-
-1. `mutation_id` (UUID del cliente) es la clave primaria de `sync_mutations`. Reenviar
-   devuelve la respuesta guardada en vez de aplicar de nuevo.
-2. `client_id` (UUID del cliente) tiene índice único por household en las tablas de
-   datos. Aunque se perdiera el registro de mutaciones, una creación reenviada choca
-   contra el índice en vez de duplicar la fila.
-
-Cada mutación va en **su propia transacción**. `completed_at` lo manda el cliente, así
-que estar tres días sin señal no corre la ventana de la siguiente tarea recurrente.
-
-**Android** (`data/local/`, `data/sync/`):
-
-- Room es la fuente de verdad de la UI; los repositorios exponen `Flow`.
-- Una escritura aplica el cambio localmente y encola la mutación (tabla `outbox`).
-- `SyncEngine` sube la cola y después baja los cambios, en ese orden.
-- `SyncWorker` (WorkManager) corre al abrir la app, tras cada escritura y cada 15 min.
-- Conflictos: gana el servidor. Un 409 descarta la mutación y el pull trae la verdad.
-- `SyncEngine.kick()` sincroniza en proceso al instante (y deja un `SyncWorker` de respaldo): el job de
-  WorkManager por sí solo puede tardar minutos. Si queda algo sin subir (5xx/red) el ciclo se corta **antes
-  del pull** (`PushIncompleteException`) para no pisar lo optimista; una mutación con 25 fallos se descarta.
-- Un **401** cierra la sesión (`SessionExpiredException`, conserva `server_url`) y `MainActivity` vuelve a la
-  pantalla de entrada: el token ya no existe en el servidor.
-- Room: sin `fallbackToDestructiveMigration` (destruiría el `outbox`). Cada cambio de esquema necesita su
-  `Migration`; los esquemas se exportan a `android/app/schemas/`.
-- Widget "Mis tareas de hoy" (`widget/TodayWidgetProvider`, RemoteViews, sin Glance): pendientes de hoy o
-  atrasadas, mías o sin asignar. Se redibuja en cada `kick`, tras cada sync y en el `ReminderWorker`.
-- Fechas: el servidor manda UTC; para "hoy/mañana" se convierte a fecha **local** (`isoToLocalDate`), y un
-  vencimiento "ese día" es el final del día local (`endOfLocalDay`).
-- Las creaciones offline viven con un id negativo provisional hasta que el servidor
-  confirma el `client_id` y devuelve el id real.
-- **Deshacer:** `undoTask` vuelve la tarea a `pending` localmente y encola
-  `task.uncomplete`. En el servidor, esa operación revierte el estado y **borra la
-  instancia que la recurrencia generó** (enlazada por `generated_from_instance_id`,
-  migración 003) con su tombstone. Es lo que hace seguro el botón "Deshacer" del
-  swipe.
-
-## Recordatorios
-
-Las horas de aviso viven en `task_templates.reminder_times` (`"HH:MM,HH:MM"`, hora
-local del teléfono; el servidor no la mira). El cliente las configura al crear la tarea o
-desde el detalle de una tarea existente. `ReminderWorker` (WorkManager, cada 15 min)
-revisa las tareas pendientes que vencen **hoy** y notifica a cada hora ya pasada que
-no se haya avisado ese día (dedupe en SharedPreferences). No hay push remoto ni
-Firebase: son notificaciones locales. WorkManager tiene un mínimo de 15 min, así que
-un aviso de las 09:00 puede salir hasta 09:14.
-
-## Convenciones de base de datos
-
-**Tipos SQLite:** como no hay tipos nativos, se usan:
-
-- `INTEGER PRIMARY KEY AUTOINCREMENT` para los ids.
-- `TIMESTAMP` para fechas: afinidad NUMERIC, pero guardan el texto ISO-8601 UTC de
-  ancho fijo que escribe el driver (`_time_format=sqlite`). Declararlas `TEXT` haría
-  que el driver no las entregue como `time.Time`. Ordenan lexicográficamente.
-- `BOOLEAN` (INTEGER 0/1) y `TEXT` con `CHECK (... IN (...))` donde antes había enums.
-
-**Toda tabla lleva estas cuatro columnas**, sin excepción:
-
-```sql
-created_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
-updated_at   TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f+00:00','now')),
-created_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED,
-updated_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIALLY DEFERRED
-```
-
-- Las FKs a `people(id)` van **inline** en el `CREATE TABLE` (SQLite no soporta
-  `ALTER TABLE ADD CONSTRAINT`) y son `DEFERRABLE INITIALLY DEFERRED`: se validan al
-  COMMIT, lo que permite crear el household y su admin en la misma transacción.
-- `created_by`/`updated_by` los pone el handler desde la persona autenticada, nunca la DB.
-- `updated_at` lo actualiza **el handler** en cada UPDATE (no hay trigger). Los INSERT
-  usan el DEFAULT.
-- `row_version` (tabla versionada) también lo pone el handler con `NextRowVersion`.
-- Migraciones: numeradas, siempre con par `.up.sql` y `.down.sql`. **Nunca edites una
-  migración ya aplicada** — añade una nueva. Se aplican en orden y se registran en
-  `_migrations`.
-- El seed es idempotente: todo `INSERT` lleva `ON CONFLICT DO NOTHING`.
-- Índices parciales donde aplique (`idx_instances_due_at ... WHERE status = 'pending'`).
-
-## Convenciones de Go
-
-- Handlers son métodos sobre `handler.Server`; un archivo por recurso.
-- Toda escritura va en transacción: `tx, err := s.DB.BeginTx(ctx, nil)` +
-  `defer tx.Rollback()` + `tx.Commit()` explícito al final.
-- Auth al principio de cada handler protegido:
-  `person, hid, ok := auth.RequireAuth(w, r); if !ok { return }`.
-- **Toda query filtra por `household_id`.** Es la única frontera de aislamiento entre
-  households; olvidarla es una fuga de datos entre familias.
-- Path params con `r.PathValue("id")`; parseo con `strconv.ParseInt`.
-- **Referencias a personas:** todo `assigned_to_id` / `preferred_assignee_id` que llegue del cliente se valida con
-  `personInHousehold` (la FK solo exige que exista, y una persona ajena filtraría su nombre por los JOIN). Los
-  JOIN a `people` también filtran por `household_id`.
-- **Validación de entrada:** longitudes (`maxNameLen`, `maxTextLen`…) y `recurrence_days` en 1..3650 (0 en
-  `/recurrence` = una sola vez) se validan en `helpers.go`, igual online y en `applyOp`.
-- Respuestas: `w.Header().Set("Content-Type", "application/json")` +
-  `json.NewEncoder(w).Encode(v)`. Errores: `http.Error(w, `{"error":"..."}`, status)`.
-- Structs de request anidados en el archivo del handler, no en `model`.
-- `PATCH` usa `COALESCE(?, columna)` para que los campos ausentes no se borren.
-- Placeholders `?` (SQLite); una fila ausente es `errors.Is(err, sql.ErrNoRows)`.
-- Tokens e invite codes: `auth.NewToken` / `auth.NewInviteCode` (`crypto/rand`).
-- SQL siempre parametrizado — nunca concatenar valores en la query.
-- Sin dependencias nuevas salvo que se pidan explícitamente.
-
-## Lógica de recurrencia
-
-En `handler.createNextInstance` (`internal/handler/instances.go`), al completar o saltar:
-
-- si `template.recurrence_days IS NULL` → no se genera nada (tarea one-shot);
-- si no → se inserta una instancia `pending` con
-  `due_at = <momento de completar> + recurrence_days` — **desde el completado, no desde el
-  `due_at` original**. Es deliberadamente no punitivo: atrasarse no acorta la ventana siguiente.
-- La nueva instancia se asigna a `template.preferred_assignee_id` (puede ser NULL).
-- Se crea dentro de la misma transacción que el `complete`/`skip`.
-- Si la plantilla está dada de baja (`is_active = false`) no se genera nada. Borrar una plantilla
-  (`DELETE /templates/{id}`, `template.delete` o `is_active=false`) retira sus instancias **pendientes** con
-  tombstone (`retirePendingInstances`); las resueltas quedan como historial.
-- Un error de base de datos en `createNextInstance` se propaga (rollback), no se traga.
-
-## Rutas registradas
-
-Fuente de verdad: `internal/server/server.go`.
-
-| Método | Path | Auth | Handler |
-|--------|------|------|---------|
-| GET | `/healthz` | — | `Health` — `{"status":"ok"}`, o 503 si la base no responde |
-| POST | `/households` | — | `CreateHousehold` — crea household + persona admin, devuelve token (tope `TOKA_MAX_HOUSEHOLDS`, default 100 → 403) |
-| POST | `/households/join` | — | `JoinHousehold` — por `invite_code` |
-| GET | `/me` | Bearer | `GetMe` — persona + hogar del token (login por token) |
-| GET | `/households/{hid}/people` | Bearer | `ListPeople` |
-| POST | `/households/{hid}/regenerate-invite` | Bearer | `RegenerateInvite` |
-| POST | `/households/{hid}/leave` | Bearer | `LeaveHousehold` — borra tu propia persona (falla si eres la última) |
-| GET | `/templates` | Bearer | `ListTemplates` (solo `is_active`) |
-| POST | `/templates` | Bearer | `CreateTemplate` + primera instancia |
-| PATCH | `/templates/{id}` | Bearer | `UpdateTemplate` |
-| POST | `/templates/{id}/recurrence` | Bearer | `SetTemplateRecurrence` — fija o borra la recurrencia (`null` = una sola vez) |
-| DELETE | `/templates/{id}` | Bearer | `DeleteTemplate` (soft: `is_active=false`) |
-| GET | `/tasks` | Bearer | `ListPendingTasks` (atrasadas primero) |
-| GET | `/tasks/history?days=30` | Bearer | `ListTaskHistory` |
-| POST | `/tasks/{id}/complete` | Bearer | `CompleteTask` |
-| POST | `/tasks/{id}/skip` | Bearer | `SkipTask` |
-| PATCH | `/tasks/{id}` | Bearer | `UpdateTask` (reasignar / notas) |
-| POST | `/households/{hid}/people` | Bearer | `CreatePerson` |
-| PATCH | `/people/{id}` | Bearer | `UpdatePerson` |
-| DELETE | `/people/{id}` | Bearer | `DeletePerson` — limpia FKs + tombstone |
-| GET | `/sync?since=N` | Bearer | `Pull` — delta desde el cursor |
-| POST | `/sync/mutations` | Bearer | `Push` — cola de escrituras offline |
-
-Sin Bearer válido: `401 {"error":"unauthorized"}`.
 
 ## Al terminar un cambio
 
-1. `gofmt -w .`, `go build ./...`, `go vet ./...` y `go test ./...`.
-2. `make smoke` (base temporal) o, con el server arriba, `.claude/scripts/smoke.sh` y `smoke-sync.sh`.
-3. Si tocaste rutas o el contrato JSON, actualiza **las dos** puntas:
-   `server.go` ↔ `TokaApi.kt` + `ApiModels.kt`. Si además es una escritura, añade su
-   operación al dispatch de `applyOp` en `internal/handler/sync.go`, o la app no podrá
-   hacerla sin conexión.
-4. Si tocaste el esquema, actualiza la tabla de rutas / convenciones de este archivo.
+1. `scripts/test-rules.sh` si tocaste reglas, modelo de datos o escrituras.
+2. `cd android && ./gradlew compileDebugKotlin` (o `assembleDebug`).
+3. Si tocaste el modelo, actualiza **las tres** puntas: `firestore.rules` ↔ `Firestore.kt`/`Models.kt`
+   ↔ este archivo (y `scripts/test-rules.sh`).
+4. Si tocaste el backend legado: `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`, `make smoke`.
+
+## Convenciones
+
+- Commits en inglés; **no hagas push, tags ni despliegues sin que se pidan**.
+- Sin dependencias nuevas salvo que se pidan explícitamente.
+- Estado de UI con `StateFlow` desde ViewModels; colores y tipografía de `ui/theme/`; strings en `res/values/strings.xml`.
 
 ## Skills del proyecto
 
-- `/migration` — crear una migración nueva con todas las convenciones
-- `/endpoint` — añadir un endpoint de punta a punta (SQL → handler → ruta → Retrofit)
-- `/smoke` — probar el flujo completo con curl contra el server local
-- `/android-feature` — añadir pantalla Compose + ViewModel + repositorio
+- `/android-feature` — pantalla Compose + ViewModel + repositorio sobre Firestore
+- `/check`, `/up` — verificación y arranque del flujo Firestore (reglas, emuladores, compilación)
+- `/migration`, `/endpoint`, `/smoke`, `/schema` — **solo backend legado** Go/SQLite

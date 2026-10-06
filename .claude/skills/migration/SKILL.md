@@ -1,7 +1,9 @@
 ---
 name: migration
-description: Crear una migración SQL nueva en db/migrations siguiendo las convenciones de Toka sobre SQLite (columnas de metadata, FKs deferrable inline, par up/down, índices). Úsala cuando haya que cambiar el esquema — tabla nueva, columna nueva, índice, CHECK.
+description: (Solo backend Go/SQLite legado) Crear una migración SQL nueva en db/migrations siguiendo las convenciones de Toka sobre SQLite (columnas de metadata, FKs deferrable inline, par up/down, índices). Úsala cuando haya que cambiar el esquema — tabla nueva, columna nueva, índice, CHECK.
 ---
+
+> **Solo backend legado.** Esta skill describe las migraciones del backend Go/SQLite (Go + SQLite), que sigue en producción hasta migrar y retirarlo. La arquitectura vigente es Firebase Auth + Firestore (ver `CLAUDE.md`); para cambios de datos ahí usa `firestore.rules`, `scripts/test-rules.sh` y `/android-feature`.
 
 # Migración nueva (SQLite)
 

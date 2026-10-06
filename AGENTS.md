@@ -1,56 +1,50 @@
 # AGENTS.md — Toka
 
-Backend Go + SQLite (un solo archivo, sin daemon ni roles) y cliente Android (Compose,
-offline-first) para tareas domésticas compartidas. El contexto profundo vive en
-**`CLAUDE.md`** (esquema, auth, sync, tabla de rutas): léelo antes de tocar el backend.
-El `/migration`, `/endpoint`, `/smoke` y `/android-feature` de `.claude/skills/` tienen
-el paso a paso de cada tarea.
+App Android (Kotlin + Compose) de tareas domésticas compartidas que usa **Firebase Auth
+(Google) + Firestore directamente**, sin servidor propio. El contexto profundo (modelo de datos,
+reglas, sesión, recurrencia) vive en **`CLAUDE.md`**: léelo antes de tocar nada.
+
+El backend Go + SQLite (`main.go`, `internal/`, `db/`, `deploy/`, `Makefile`) es **legado**: sigue
+en producción (`https://toka.nuxapower.cl`) hasta migrar los datos y retirarlo. No se le añaden
+features. Las skills `/migration`, `/endpoint`, `/smoke` y `/schema` aplican solo a él.
 
 ## Comandos
 
 ```bash
-make run-seed   # migra + siembra + sirve en :3000 (copia .env.example → .env si falta)
-make run        # migra + sirve
-make db-reset   # ⚠️ borra toka.db y lo recrea con seed
-make curl-setup # cheat-sheet de todos los endpoints
+scripts/test-rules.sh                        # prueba firestore.rules (emulador propio)
+scripts/dev.sh                               # emuladores Firebase + emulador Android + "Toka DEV"
+scripts/dev.sh --parar                       # detiene los emuladores de Toka
+scripts/publicar-reglas.sh                   # publica reglas en toka-hogar-e194 (solo si se pide)
+cd android && ./gradlew compileDebugKotlin   # verificación rápida
+cd android && ./gradlew assembleDebug
 ```
 
-- El server **lee `db/migrations/` y `db/seed.sql` del disco en runtime**: ejecútalo
-  desde la raíz del repo. Flags: `-seed`, `-port`, `-migrate-only`, `-env <archivo>`.
-- `TOKA_DB` elige el archivo SQLite (default `toka.db`).
-- Android: `cd android && ./gradlew assembleDebug` (o `compileDebugKotlin` para verificar
-  rápido). `BASE_URL` por defecto (`android/app/build.gradle.kts`) es `https://toka.nuxapower.cl/`; el build debug permite http para el emulador (`http://10.0.2.2:3000`).
+Emuladores de Toka: Auth 9199 / Firestore 8185 / UI 4100. Finanzas usa 9099 / 8085: **nunca los
+compartas ni los mates (nada de `pkill -f`)**. La build debug es `com.toka.app.dev` y usa los
+emuladores; la release es `com.toka.app` y necesita `android/app/google-services.json` real.
 
 ## Verificación
 
-Los tests de Go (`go test ./...`) viven en `internal/server/server_test.go`. Al terminar un cambio:
+1. `scripts/test-rules.sh` si tocaste reglas, modelo o escrituras.
+2. `cd android && ./gradlew compileDebugKotlin`.
+3. Si tocaste el backend legado: `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`, `make smoke`.
 
-1. `gofmt -w .` y luego `gofmt -l .` vacío (no hay target de `make` para esto).
-2. `go build ./...`, `go vet ./...` y `go test ./...`.
-3. Con el server arriba: `.claude/scripts/smoke.sh` y `.claude/scripts/smoke-sync.sh`.
-4. Android: `cd android && ./gradlew compileDebugKotlin`.
-
-`.claude/commands/check.md` describe el orden completo. Los releases salen de tags `vX.Y.Z` (ver README); no hay flujo de PR documentado, no
-inventes convenciones de ramas.
+`.claude/commands/check.md` tiene el orden completo. Los releases salen de tags `vX.Y.Z` (ver README);
+no hay flujo de PR documentado, no inventes convenciones de ramas.
 
 ## Reglas que un agente suele romper
 
-- **Aislamiento por household: lo aplica el código, no la DB.** SQLite no trae Row-Level
-  Security; **toda query autenticada filtra por `household_id`** y es la única frontera
-  entre familias. Olvidarla es una fuga entre familias.
-- **Contrato JSON sincronizado en dos puntas:** `internal/server/server.go` ↔
-  `data/api/TokaApi.kt` + `ApiModels.kt`. Si es una escritura offline, añádela al dispatch
-  de `applyOp` en `internal/handler/sync.go` o la app no podrá hacerla sin red.
-- **Toda escritura versionada asigna `row_version = db.NextRowVersion(tx)`** y, si es un
-  UPDATE, actualiza `updated_at` a mano (SQLite no tiene trigger `set_updated_at()`).
-- **Migraciones:** par `.up.sql`/`.down.sql`, numeradas, nunca editar una ya aplicada.
-  Toda tabla lleva `created_at/updated_at/created_by/updated_by`, FKs a `people` como
-  `DEFERRABLE INITIALLY DEFERRED` e índices.
-- **Escrituras en transacción:** `BeginTx` + `defer Rollback` + `Commit` explícito;
-  `created_by`/`updated_by` salen de `auth.RequireAuth`, nunca del body.
-- **PATCH usa `COALESCE(?, columna)`** en los handlers HTTP y en `applyOp`, para que un
-  campo ausente no borre el valor existente y online/offline se comporten igual.
-- **Recurrencia:** la siguiente instancia nace con `due_at = <momento de completar> +
-  recurrence_days`, no desde el `due_at` original. `recurrence_days IS NULL` → no genera.
-- Tokens/invite codes con `crypto/rand`, nunca `math/rand`. Sin dependencias nuevas salvo
-  que se pidan.
+- **El aislamiento entre hogares lo hacen `firestore.rules`, no el cliente.** Toda colección nueva o
+  campo nuevo necesita regla y prueba en `scripts/test-rules.sh`. Las reglas validan que miembros y
+  asignados (`assignedToId`, `preferredAssigneeId`) pertenezcan al hogar.
+- **Las escrituras no esperan la red:** sin `await()` de escrituras de Firestore en UI/ViewModel
+  (offline nunca resolvería). Firestore las encola en su caché; ⟳ N cuenta `hasPendingWrites`.
+- **Ids de persona son `String`** (uid de Firebase), nunca `Int`/`Long`.
+- **Recurrencia en `TaskRepository.resolve`:** tarea + siguiente en el **mismo `WriteBatch`**, id
+  determinista `nextTaskId`, `dueAt = momento de completar + recurrenceDays`, asignada a
+  `preferredAssigneeId`; plantilla inactiva o de una sola vez no genera. Deshacer borra la siguiente
+  si sigue pendiente.
+- **Unirse a un hogar en dos pasos** (members + perfil, luego `users/{uid}`) y listeners con
+  `retryOnPermissionDenied`.
+- **Modelo en tres puntas:** `firestore.rules` ↔ `Firestore.kt`/`Models.kt` ↔ `CLAUDE.md`.
+- Sin dependencias nuevas salvo que se pidan. Commits en inglés; sin push, tags ni despliegues sin pedirlos.

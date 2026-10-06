@@ -1,22 +1,18 @@
 ---
-description: Arranca el backend (SQLite, sin daemon) y deja el entorno listo para probar
+description: Levanta los emuladores de Firebase de Toka y la app debug para probar
 allowed-tools: Bash
 ---
 
-Arranca el entorno de desarrollo de Toka y déjalo verificado. No hay Postgres ni Docker:
-la base es un archivo SQLite (`TOKA_DB`, por defecto `toka.db`).
+Arranca el entorno de desarrollo de Toka (Firebase local, sin servidor propio ni Google real).
 
-1. Comprueba si el server ya está arriba: `curl -s http://localhost:3000/healthz`
-   (debe responder `{"status":"ok"}`). Si responde, no arranques otro.
-2. Si no responde, arráncalo **desde la raíz del repo** (lee `db/migrations/` y
-   `db/seed.sql` del disco) en background y espera a que `/healthz` conteste:
-   - `make run` — migra al arrancar y conserva los datos existentes;
-   - `make run-seed` — además carga `db/seed.sql` (idempotente). El seed es solo de
-     desarrollo.
-   Usa `make run-seed` solo si se pidió o si `toka.db` no existe; si no, `make run`.
-3. Reporta en dos líneas: estado del server y el token de seed disponible
-   (`toka-dev-token`, solo si la base tiene el seed cargado — verifícalo con
-   `curl -s http://localhost:3000/me -H "Authorization: Bearer toka-dev-token"`, no lo
-   asumas).
+1. Comprueba si los emuladores ya están arriba: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8185`
+   (Firestore) y `:9199` (Auth). Son los de Toka; los de Finanzas (9099/8085) son otro proyecto y
+   **no se tocan**.
+2. Corre `scripts/dev.sh` (emuladores con `firestore.rules`, datos persistentes en `.emulador/`,
+   emulador Android y app "Toka DEV" `com.toka.app.dev`). Añade `--sin-compilar` si el APK ya está
+   al día. Para un teléfono real: `DISPOSITIVO=<serial> scripts/dev.sh`. Necesita Java 21+ y `npx`.
+3. Reporta en dos líneas: estado de los emuladores (UI en http://127.0.0.1:4100) y dónde quedó
+   instalada la app. En la app: "Entrar como Ana (dev)" / "Entrar como Beto (dev)".
 
-No ejecutes `make db-reset` (destruye datos) salvo que se pida explícitamente.
+Para detenerlos: `scripts/dev.sh --parar` (por PID, nunca `pkill -f`). No borres `.emulador/`
+(sus datos) salvo que se pida. El backend Go legado se levanta aparte con `make run`.

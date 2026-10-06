@@ -1,7 +1,9 @@
 ---
 name: endpoint
-description: Añadir o modificar un endpoint HTTP de Toka de punta a punta — handler en internal/handler, registro en server.go, y el cliente Retrofit en Android. Úsala cuando se pida una ruta nueva, cambiar un contrato JSON, o cuando la app Android llame a algo que el backend no expone.
+description: (Solo backend Go/SQLite legado) Añadir o modificar un endpoint HTTP de Toka de punta a punta — handler en internal/handler, registro en server.go, y el cliente Retrofit en Android. Úsala cuando se pida una ruta nueva, cambiar un contrato JSON, o cuando la app Android llame a algo que el backend no expone.
 ---
+
+> **Solo backend legado.** Esta skill describe las rutas HTTP del backend Go (Go + SQLite), que sigue en producción hasta migrar y retirarlo. La arquitectura vigente es Firebase Auth + Firestore (ver `CLAUDE.md`); para cambios de datos ahí usa `firestore.rules`, `scripts/test-rules.sh` y `/android-feature`.
 
 # Endpoint de punta a punta
 

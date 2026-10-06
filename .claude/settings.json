@@ -17,7 +17,10 @@
       "Bash(curl -s http://localhost:3000/*)",
       "Bash(curl -s -X POST http://localhost:3000/*)",
       "Bash(./gradlew assembleDebug*)",
-      "Bash(./gradlew compileDebugKotlin*)"
+      "Bash(./gradlew compileDebugKotlin*)",
+      "Bash(scripts/test-rules.sh)",
+      "Bash(scripts/dev.sh*)",
+      "Bash(./gradlew :app:assembleDebug*)"
     ],
     "ask": [
       "Bash(make db-reset)",

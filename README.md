@@ -3,54 +3,88 @@
 Tareas domésticas compartidas. Una casa, varias personas, plantillas de tarea que se
 regeneran solas cuando alguien las completa.
 
-Backend en Go con SQLite (un solo archivo, sin daemon), cliente Android en Compose que
-funciona sin conexión.
+App Android (Kotlin + Compose) que usa **Firebase Auth (Google) + Firestore directamente**,
+sin servidor propio, y funciona sin conexión gracias a la caché persistente de Firestore.
+Misma arquitectura que la app Finanzas.
 
 ## Cómo funciona
 
-Un **household** agrupa a varias **people**. Cada **task_template** describe una tarea
-("sacar la basura, cada 7 días") y va generando **task_instances** concretas.
+Un **household** agrupa a varias **people**. Cada **template** describe una tarea
+("sacar la basura, cada 7 días") y va generando **tasks** concretas.
 
-Al completar una instancia recurrente se crea la siguiente con
-`due_at = momento de completar + recurrence_days`. Se cuenta desde el completado y no
-desde el vencimiento original, a propósito: atrasarse un día no deja la siguiente
-tarea a un día de distancia. La recurrencia no castiga.
+Al completar una tarea recurrente se crea la siguiente con
+`dueAt = momento de completar + recurrenceDays`, en el mismo `WriteBatch`. Se cuenta desde el
+completado y no desde el vencimiento original, a propósito: atrasarse un día no deja la
+siguiente a un día de distancia. La recurrencia no castiga.
 
-## Puesta en marcha
+Modelo de datos y reglas de seguridad: ver `CLAUDE.md` y `firestore.rules`.
 
-Requiere Go 1.26. No hace falta instalar ningún motor de base de datos: SQLite vive en
-un solo archivo (`toka.db`).
+## Desarrollo local (sin Google ni Firebase reales)
 
-```bash
-make run-seed   # migra, siembra y sirve en :3000 (crea .env si falta)
-```
-
-La base se migra sola al arrancar, leyendo `db/migrations/` del disco, así que el
-servidor se ejecuta desde la raíz del repo.
-
-El seed (`db/seed.sql`) es **solo para desarrollo**: crea un hogar "Demo" con credenciales
-públicas (token `toka-dev-token`, invite `DEVDEMO234`). Nunca lo cargues en un servidor
-expuesto.
+Requiere Android SDK, Java 21+ (para los emuladores de Firebase) y `npx`.
 
 ```bash
-curl -s localhost:3000/tasks -H "Authorization: Bearer toka-dev-token" | jq
+scripts/dev.sh            # emuladores Firebase + emulador Android + instala "Toka DEV"
+scripts/test-rules.sh     # prueba firestore.rules (50 comprobaciones, emulador propio)
+cd android && ./gradlew compileDebugKotlin
 ```
 
-`make curl-setup` imprime el resto de los endpoints.
+La build debug (`com.toka.app.dev`, "Toka DEV") apunta a los emuladores y ofrece "Entrar como
+Ana/Beto (dev)". Los emuladores de Toka usan Auth 9199 / Firestore 8185 / UI 4100, para no
+chocar con los de Finanzas (9099 / 8085), que nunca se tocan. Con un teléfono real:
+`DISPOSITIVO=<serial> scripts/dev.sh` (pasa `-Ptoka.emulador=<ip del PC>`).
 
-Android:
+## Firebase real: checklist de consola
+
+Proyecto `toka-hogar-e194` (cuenta nuxapower@gmail.com), Firestore en `southamerica-west1`, plan Spark.
+Ya hecho por API: proyecto de Google Cloud, base de datos Firestore y reglas publicadas
+(`scripts/publicar-reglas.sh`). Pasos manuales pendientes (la cuenta aún no aceptó los términos de
+Firebase y la API de gestión lo exige desde la consola):
+
+- [ ] Agregar Firebase al proyecto de Google Cloud existente (consola → "Agregar proyecto" → elegir `toka-hogar-e194`).
+- [ ] Registrar la app Android `com.toka.app` con la huella SHA-1 de release
+      `88:7E:EC:40:9C:3C:D5:A5:F0:CA:F6:48:09:F3:7A:BB:17:37:24:32`.
+- [ ] Habilitar Authentication → proveedor Google.
+- [ ] Descargar `google-services.json` a `android/app/` (gitignoreado) y, para CI, guardarlo en base64
+      como secret `GOOGLE_SERVICES_JSON_BASE64`.
+- [x] Reglas publicadas (repetir `scripts/publicar-reglas.sh` cada vez que cambie `firestore.rules`).
+
+## Releases e instalación con Obtainium
+
+Cada tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que compila un APK firmado y
+lo publica como GitHub Release. [Obtainium](https://github.com/ImranR98/Obtainium) lee
+esos releases y actualiza la app sola.
+
+1. Instala Obtainium.
+2. "Add App" → pega `https://github.com/alonsoburon/toka`.
+3. Obtainium detecta los releases y el asset `.apk` sin configuración extra.
+
+Para publicar una versión:
 
 ```bash
-cd android && ./gradlew assembleDebug
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
-La URL del backend por defecto (`BASE_URL` en `android/app/build.gradle.kts`) es
-`https://toka.nuxapower.cl/`; se puede cambiar en la pantalla "Conectar al servidor". Desde
-el emulador, el backend local del host se ve como `http://10.0.2.2:3000`.
+El workflow verifica la firma (`apksigner verify`) y falla si faltan los secrets, en vez de
+publicar un APK sin firmar. Deriva `versionName` del tag y `versionCode = major*10000 + minor*100 + patch`,
+así que un tag más alto siempre instala por encima del anterior. La firma usa el keystore
+guardado en los secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD`; además necesita `GOOGLE_SERVICES_JSON_BASE64`
+(el `google-services.json` real) y falla si falta.
 
-## Servidor en producción
+**Guarda `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
+Son la única forma de firmar actualizaciones que Android acepte como del mismo
+desarrollador; si se pierden, hay que desinstalar y reinstalar. El APK de release y el de
+debug tienen firmas distintas: para pasar de uno a otro hay que desinstalar.
 
-Corre en el VPS OVH (Debian, Podman rootless + Quadlet, Caddy delante, Cloudflare):
+## Backend legado en producción (a retirar tras migrar)
+
+Local: `make run-seed` (Go 1.26, SQLite en `toka.db`, sirve en :3000, lee `db/` desde la raíz del repo);
+`make smoke` lo prueba contra una base temporal. El seed es solo de desarrollo (hogar "Demo" con
+credenciales públicas).
+
+Ya no es parte de la arquitectura vigente (la app usa Firebase), pero sigue sirviendo hasta que se migren los datos y se retire. Corre en el VPS OVH (Debian, Podman rootless + Quadlet, Caddy delante, Cloudflare):
 
 - URL pública: `https://toka.nuxapower.cl` (Caddy → `127.0.0.1:3001`; el contenedor no
   publica nada más). Sondeo: `GET /healthz`.
@@ -81,62 +115,30 @@ auditoría de quién hay en el hogar y rota el token y el invite; verifica que l
 están en `deploy/`. Un respaldo sin restauración probada no cuenta: corre
 `restore-check.sh` después de instalar el timer.
 
-## Releases e instalación con Obtainium
-
-Cada tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que compila un APK firmado y
-lo publica como GitHub Release. [Obtainium](https://github.com/ImranR98/Obtainium) lee
-esos releases y actualiza la app sola.
-
-1. Instala Obtainium.
-2. "Add App" → pega `https://github.com/alonsoburon/toka`.
-3. Obtainium detecta los releases y el asset `.apk` sin configuración extra.
-
-Para publicar una versión:
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-El workflow verifica la firma (`apksigner verify`) y falla si faltan los secrets, en vez de
-publicar un APK sin firmar. Deriva `versionName` del tag y `versionCode = major*10000 + minor*100 + patch`,
-así que un tag más alto siempre instala por encima del anterior. La firma usa el keystore
-guardado en los secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
-`ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD`.
-
-**Guarda `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
-Son la única forma de firmar actualizaciones que Android acepte como del mismo
-desarrollador; si se pierden, hay que desinstalar y reinstalar. El APK de release y el de
-debug tienen firmas distintas: para pasar de uno a otro hay que desinstalar.
-
 ## Decisiones que vale la pena conocer
 
-**El aislamiento entre casas lo aplica el código Go.** SQLite no trae Row-Level
-Security, así que cada query autenticada filtra por `household_id`; olvidarlo es una
-fuga entre familias. Es la frontera que antes garantizaba RLS en Postgres.
+**El aislamiento entre casas lo aplican las reglas de Firestore.** No hay servidor que filtre:
+`firestore.rules` exige ser miembro del hogar para leer o escribir, y valida que asignados y
+miembros pertenezcan al hogar. Se prueban con `scripts/test-rules.sh`.
 
-**Los bearer tokens se guardan hasheados** (`people.token_hash`, sha256). Un dump de la
-base no entrega sesiones.
+**Las escrituras no esperan la red.** Firestore las guarda en su caché y las sube solas; la UI
+nunca hace `await` de una escritura. El indicador ⟳ N cuenta los documentos con escrituras pendientes.
 
-**El cliente Android es local-first.** La UI lee de SQLite y nunca espera a la red. Las
-escrituras se aplican al instante y se encolan; al recuperar señal suben con un id de
-mutación estable, así que reintentar tras un timeout no duplica nada. Una tarea marcada
-en el metro llega al servidor con la hora en que se marcó, no con la hora en que volvió
-la señal.
+**La recurrencia vive en el cliente y es idempotente.** La tarea siguiente tiene un id determinista
+(hash del id de la actual), así que dos teléfonos que completan lo mismo sin conexión no la duplican.
+Deshacer devuelve la tarea a pendiente y borra la siguiente si aún está pendiente.
 
-**El cursor de sincronización es un contador con lock, no una secuencia.** Una secuencia
-reparte números antes del COMMIT, y dos transacciones pueden confirmar en orden inverso
-al de asignación: un cliente que sincroniza justo en medio se salta una fila y no se
-entera nunca. El lock fuerza que ambos órdenes coincidan.
+**Unirse a un hogar va en dos pasos** (miembros + perfil, luego el puntero `users/{uid}`) para evitar
+una carrera de permisos, y los listeners reintentan ante `PERMISSION_DENIED`.
 
-Está todo desarrollado en `CLAUDE.md`, que es también el contexto que usan los agentes
-que trabajan en este repositorio.
+**Recordatorios locales.** `ReminderWorker` (WorkManager, cada 15 min) y el widget "Mis tareas de
+hoy" leen de la caché de Firestore; no hay push remoto.
+
+Todo está desarrollado en `CLAUDE.md`, que es también el contexto que usan los agentes que
+trabajan en este repositorio.
 
 ## Estado
 
-Funciona y está verificado de punta a punta con `go test ./...` (aislamiento entre hogares,
-sync/`applyOp`, recurrencia, validación) y con `make smoke`, que ejercita la API real contra una
-SQLite temporal.
-
-El Dashboard, Historial y Personas ya leen de los `Flow` de Room, así que se redibujan
-solos cuando entra un sync. El detalle de tarea y "crear plantilla" también leen de Room.
+Migración a Firestore hecha en la rama `firestore`: auth, hogar, tareas y recurrencia en el cliente,
+con reglas probadas en emulador. Falta completar el checklist de consola y migrar los datos del
+backend legado antes de retirarlo.

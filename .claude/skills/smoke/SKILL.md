@@ -1,7 +1,9 @@
 ---
 name: smoke
-description: Probar el flujo completo de la API de Toka con curl contra el server local — crear household, unir persona, crear plantilla, listar tareas, completar y verificar que se generó la siguiente instancia recurrente. Úsala para verificar que un cambio funciona de verdad, no solo que compila.
+description: (Solo backend Go/SQLite legado) Probar el flujo completo de la API de Toka con curl contra el server local — crear household, unir persona, crear plantilla, listar tareas, completar y verificar que se generó la siguiente instancia recurrente. Úsala para verificar que un cambio funciona de verdad, no solo que compila.
 ---
+
+> **Solo backend legado.** Esta skill describe la API HTTP del backend Go (Go + SQLite), que sigue en producción hasta migrar y retirarlo. La arquitectura vigente es Firebase Auth + Firestore (ver `CLAUDE.md`); para cambios de datos ahí usa `firestore.rules`, `scripts/test-rules.sh` y `/android-feature`.
 
 # Smoke test de la API
 

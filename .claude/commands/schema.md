@@ -1,7 +1,9 @@
 ---
-description: Muestra el esquema real de la base de datos y lo contrasta con los modelos de Go
+description: (Solo backend legado) Muestra el esquema real de la base de datos y lo contrasta con los modelos de Go
 allowed-tools: Bash, Read, Grep
 ---
+
+> **Solo backend legado (Go + SQLite).** El modelo vigente es Firestore: ver `CLAUDE.md` y `firestore.rules`.
 
 Inspecciona la base SQLite en vivo (`toka.db`, o la ruta de `TOKA_DB`) y contrástala con
 el código:
