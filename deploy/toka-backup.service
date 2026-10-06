@@ -1,9 +1,12 @@
 [Unit]
-Description=Respaldo de toka.db
+Description=Respaldo de toka.db (local verificado + R2)
 
 [Service]
 Type=oneshot
-# Ajusta TOKA_DB a la ruta en el host del volumen del contenedor.
-Environment=TOKA_DB=%h/apps/toka-data/toka.db
+# El volumen del contenedor rootless es de un uid remapeado (110000 en el host): solo se
+# puede leer/escribir bien desde el user namespace de podman, de ahí `podman unshare`.
+# Requiere el paquete sqlite3 en el host.
+Environment=TOKA_DB=%h/.local/share/containers/storage/volumes/toka-data/_data/toka.db
 Environment=TOKA_BACKUP_DIR=%h/backups/toka
-ExecStart=%h/apps/toka/deploy/backup-toka.sh
+Environment=TOKA_BACKUP_UPLOAD=%h/apps/toka/deploy/upload-r2.sh
+ExecStart=/usr/bin/podman unshare %h/apps/toka/deploy/backup-toka.sh

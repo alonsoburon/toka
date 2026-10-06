@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/toka .
 
 FROM docker.io/library/alpine:3.22
-RUN adduser -D -u 10001 toka && mkdir -p /data && chown toka /data
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 toka && mkdir -p /data && chown toka /data
 WORKDIR /app
 COPY --from=build /out/toka /app/toka
 COPY db/migrations /app/db/migrations

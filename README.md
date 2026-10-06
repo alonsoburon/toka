@@ -72,8 +72,9 @@ curl -s https://toka.nuxapower.cl/healthz
 
 ### Respaldo
 
-`deploy/backup-toka.sh` hace una copia consistente con `sqlite3 .backup` (sin parar el
-servicio), verifica `PRAGMA integrity_check` y la sube a R2; `deploy/restore-check.sh`
+El volumen es de un uid remapeado del contenedor rootless, así que los scripts de `deploy/` se corren con
+`podman unshare` (y necesitan `sqlite3` en el host). `deploy/backup-toka.sh` hace una copia consistente con `sqlite3 .backup` (sin parar el
+servicio), verifica `PRAGMA integrity_check` y la sube a R2 con `deploy/upload-r2.sh` (`tucunar-backups/toka/<fecha>/`, retención 14 días); `deploy/restore-check.sh`
 restaura la última copia a un archivo temporal y compara conteos. Si el seed llegó a producción (token/invite
 públicos), `deploy/rotate-household-credentials.sh PERSON_ID HOUSEHOLD_ID` hace respaldo verificado, muestra una
 auditoría de quién hay en el hogar y rota el token y el invite; verifica que la base cambió antes de imprimirlos. Los units de systemd
