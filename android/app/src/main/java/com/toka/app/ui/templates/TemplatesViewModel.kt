@@ -2,10 +2,10 @@ package com.toka.app.ui.templates
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.toka.app.data.api.PersonDTO
-import com.toka.app.data.api.TemplateDTO
-import com.toka.app.data.api.UpdateTemplateRequest
-import com.toka.app.data.repository.PeopleRepository
+import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.model.TemplateDTO
+import com.toka.app.data.model.UpdateTemplateRequest
+import com.toka.app.data.repository.HouseholdRepository
 import com.toka.app.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +24,7 @@ data class TemplatesUiState(
 
 class TemplatesViewModel(
     private val taskRepository: TaskRepository,
-    private val peopleRepository: PeopleRepository
+    private val peopleRepository: HouseholdRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TemplatesUiState())
@@ -43,7 +43,7 @@ class TemplatesViewModel(
         }
     }
 
-    fun update(id: Long, request: UpdateTemplateRequest) {
+    fun update(id: String, request: UpdateTemplateRequest) {
         viewModelScope.launch {
             taskRepository.updateTemplate(id, request).onFailure { e ->
                 _uiState.update { it.copy(error = e.message ?: "No se pudo actualizar") }
@@ -51,7 +51,7 @@ class TemplatesViewModel(
         }
     }
 
-    fun setRecurrence(id: Long, recurrenceDays: Int?) {
+    fun setRecurrence(id: String, recurrenceDays: Int?) {
         viewModelScope.launch {
             taskRepository.setTemplateRecurrence(id, recurrenceDays).onFailure { e ->
                 _uiState.update { it.copy(error = e.message ?: "No se pudo actualizar") }
@@ -59,7 +59,7 @@ class TemplatesViewModel(
         }
     }
 
-    fun delete(id: Long) {
+    fun delete(id: String) {
         viewModelScope.launch {
             taskRepository.deleteTemplate(id).onFailure { e ->
                 _uiState.update { it.copy(error = e.message ?: "No se pudo eliminar") }

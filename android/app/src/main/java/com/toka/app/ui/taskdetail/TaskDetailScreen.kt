@@ -67,9 +67,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.toka.app.R
-import com.toka.app.data.api.PersonDTO
-import com.toka.app.data.api.TaskDTO
-import com.toka.app.data.api.UpdateTemplateRequest
+import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.model.TaskDTO
+import com.toka.app.data.model.UpdateTemplateRequest
 import com.toka.app.data.di.AppContainer
 import com.toka.app.data.endOfLocalDay
 import com.toka.app.ui.components.PersonChip
@@ -94,7 +94,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDetailScreen(
-    taskId: Long,
+    taskId: String,
     onNavigateBack: () -> Unit
 ) {
     var task by remember { mutableStateOf<TaskDTO?>(null) }
@@ -129,7 +129,7 @@ fun TaskDetailScreen(
         }
     }
     LaunchedEffect(Unit) {
-        AppContainer.instance.peopleRepository.people.collect { people = it }
+        AppContainer.instance.householdRepository.people.collect { people = it }
     }
 
     /** Reprograma a "hoy + n días" desde los chips rápidos (vence al final de ese día). */

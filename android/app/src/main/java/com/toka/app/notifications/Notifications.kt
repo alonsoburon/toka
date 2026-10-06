@@ -123,7 +123,7 @@ object Notifications {
 
     private fun actionPending(
         context: Context,
-        taskId: Long,
+        taskId: String,
         requestCode: Int,
         notificationId: Int,
         action: String

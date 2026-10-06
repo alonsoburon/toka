@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
 import com.toka.app.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.model.TaskDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState
@@ -68,18 +68,18 @@ import java.time.Instant
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DashboardScreen(
-    onNavigateToTask: (Long) -> Unit,
+    onNavigateToTask: (String) -> Unit,
     onNavigateToCreateTemplate: () -> Unit
 ) {
     val viewModel = tokaViewModel { DashboardViewModel(AppContainer.instance.taskRepository) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val userEmoji by AppContainer.instance.tokenStore.userEmoji.collectAsState(initial = "🐣")
-    val userName by AppContainer.instance.tokenStore.userName.collectAsState(
-        initial = stringResource(R.string.common_you)
-    )
-    val userColor by AppContainer.instance.tokenStore.userColor.collectAsState(initial = null)
+    val people by AppContainer.instance.householdRepository.people.collectAsState()
+    val me = people.firstOrNull { it.id == AppContainer.instance.authRepository.current?.uid }
+    val userEmoji = me?.avatarEmoji ?: "🐣"
+    val userName = me?.name ?: stringResource(R.string.common_you)
+    val userColor = me?.color
     val pendingSync by AppContainer.instance.taskRepository.pendingSyncCount
         .collectAsState(initial = 0)
 

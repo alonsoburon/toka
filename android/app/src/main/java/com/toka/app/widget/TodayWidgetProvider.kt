@@ -15,7 +15,6 @@ import com.toka.app.notifications.Notifications
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -54,9 +53,8 @@ class TodayWidgetProvider : AppWidgetProvider() {
 
         private suspend fun render(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val container = AppContainer.instance
-            val signedIn = container.tokenStore.tokenFlow.first() != null
-            val personId = container.tokenStore.getPersonId()
-            val tasks = if (signedIn) container.taskRepository.todayTasks(personId) else emptyList()
+            val signedIn = container.sessionCache.uid != null && container.sessionCache.householdId != null
+            val tasks = if (signedIn) container.taskRepository.todayTasks() else emptyList()
 
             val rowIds = intArrayOf(R.id.widget_task_1, R.id.widget_task_2, R.id.widget_task_3)
             for (id in ids) {
@@ -104,7 +102,7 @@ class TodayWidgetProvider : AppWidgetProvider() {
         }
 
         /** Abre la app, y la tarea concreta si se toca una fila (mismo extra que las notificaciones). */
-        private fun openApp(context: Context, taskId: Long?): PendingIntent {
+        private fun openApp(context: Context, taskId: String?): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 if (taskId != null) putExtra(Notifications.EXTRA_TASK_ID, taskId)
@@ -112,7 +110,7 @@ class TodayWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getActivity(
                 context,
                 // requestCode distinto por tarea: si no, FLAG_UPDATE_CURRENT pisa los extras.
-                (taskId ?: 0L).hashCode(),
+                (taskId ?: "").hashCode(),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )

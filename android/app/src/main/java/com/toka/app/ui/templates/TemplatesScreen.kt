@@ -59,9 +59,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.R
-import com.toka.app.data.api.PersonDTO
-import com.toka.app.data.api.TemplateDTO
-import com.toka.app.data.api.UpdateTemplateRequest
+import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.model.TemplateDTO
+import com.toka.app.data.model.UpdateTemplateRequest
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState
@@ -84,7 +84,7 @@ fun TemplatesScreen(
     val viewModel = tokaViewModel {
         TemplatesViewModel(
             AppContainer.instance.taskRepository,
-            AppContainer.instance.peopleRepository
+            AppContainer.instance.householdRepository
         )
     }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

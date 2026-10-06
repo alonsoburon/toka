@@ -109,7 +109,7 @@ def new_house(owner, code=None):
     hid = "h" + uuid.uuid4().hex[:8]
     code = code or "".join(c for c in uuid.uuid4().hex.upper() if c.isalnum())[:6]
     ok = owner.commit(
-        doc(f"households/{hid}", {"inviteCode": code, "members": [owner.uid], "createdBy": owner.uid, "createdAt": NOW}),
+        doc(f"households/{hid}", {"name": "Casa", "inviteCode": code, "members": [owner.uid], "createdBy": owner.uid, "createdAt": NOW}),
         doc(f"invites/{code}", {"householdId": hid}),
         doc(f"households/{hid}/people/{owner.uid}", {"name": "Ana", "color": "#a78bfa", "emoji": "🐱"}),
         doc(f"users/{owner.uid}", {"householdId": hid}),
@@ -130,9 +130,12 @@ def main():
     print("Hogar e invitaciones")
     hid = "h" + uuid.uuid4().hex[:8]
     check("no se puede crear un hogar con otro miembro", ana.commit(doc(f"households/{hid}", {
-        "inviteCode": "ABC123", "members": [beto.uid], "createdBy": ana.uid, "createdAt": NOW})), False)
+        "name": "Casa", "inviteCode": "ABC123", "members": [beto.uid], "createdBy": ana.uid, "createdAt": NOW})), False)
+    check("un hogar sin nombre se rechaza", ana.commit(doc(f"households/{hid}", {
+        "inviteCode": "ABC123", "members": [ana.uid], "createdBy": ana.uid, "createdAt": NOW})), False)
     check("no se puede crear un hogar con campos extra", ana.commit(doc(f"households/{hid}", {
-        "inviteCode": "ABC123", "members": [ana.uid], "createdBy": ana.uid, "createdAt": NOW, "admin": True})), False)
+        "name": "Casa", "inviteCode": "ABC123", "members": [ana.uid], "createdBy": ana.uid, "createdAt": NOW,
+        "admin": True})), False)
     hid, code = new_house(ana)
     check("crear hogar + invitación + perfil", True)
     check("un miembro lee su hogar", ana.read(f"households/{hid}"))
@@ -155,6 +158,8 @@ def main():
         doc(f"households/{hid}", {"members": [beto.uid]}, ["members"])), False)
     check("un extraño no cambia el código", eva.commit(
         doc(f"households/{hid}", {"inviteCode": "NEW111"}, ["inviteCode"])), False)
+    check("un miembro renombra el hogar", beto.commit(doc(f"households/{hid}", {"name": "Casa nueva"}, ["name"])))
+    check("un extraño no renombra el hogar", eva.commit(doc(f"households/{hid}", {"name": "x"}, ["name"])), False)
     check("un miembro regenera el código", beto.commit(
         doc(f"households/{hid}", {"inviteCode": "NEW111"}, ["inviteCode"]),
         doc("invites/NEW111", {"householdId": hid})))

@@ -3,9 +3,8 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
+    id("com.google.gms.google-services")
 }
 
 // Firma de release. En CI las credenciales llegan por variables de entorno; en local
@@ -28,11 +27,6 @@ kotlin {
     }
 }
 
-// Room exporta el esquema a app/schemas/ (se versiona) para escribir y probar migraciones.
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-}
-
 android {
     namespace = "com.toka.app"
     compileSdk = 36
@@ -47,9 +41,6 @@ android {
         versionCode = (project.findProperty("tokaVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("tokaVersionName") as String?) ?: "0.1.0-dev"
 
-        // VPS OVH detrás de Caddy. Se puede cambiar en Ajustes → Cambiar servidor o en
-        // el onboarding.
-        buildConfigField("String", "BASE_URL", "\"https://toka.nuxapower.cl/\"")
     }
 
     signingConfigs {
@@ -64,7 +55,18 @@ android {
     }
 
     buildTypes {
+        // Desarrollo local: el debug usa los emuladores de Firebase (scripts/dev.sh) y ofrece un login
+        // falso, sin Google real. -Ptoka.emulador=<ip> para un teléfono en la LAN, o -Ptoka.emulador=
+        // (vacío) para que el debug use Firebase real.
+        debug {
+            // Se instala junto a la app real ("Toka DEV"), sin pisar sus datos ni su widget.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            val host = (project.findProperty("toka.emulador") as String?) ?: "10.0.2.2"
+            buildConfigField("String", "EMULATOR_HOST", "\"$host\"")
+        }
         release {
+            buildConfigField("String", "EMULATOR_HOST", "\"\"")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -107,23 +109,19 @@ dependencies {
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.9.8")
 
-    // HTTP
-    implementation("com.squareup.retrofit2:retrofit:2.12.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+    // Firebase: Auth + Firestore (caché persistente: la app funciona sin conexión y sincroniza sola)
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
 
-    // Persistencia local: SQLite es la fuente de verdad de la UI
-    implementation("androidx.room:room-runtime:2.8.5")
-    implementation("androidx.room:room-ktx:2.8.5")
-    ksp("androidx.room:room-compiler:2.8.5")
+    // Entrar con Google (Credential Manager)
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
 
-    // Sincronización en segundo plano, sobrevive al cierre de la app
+    // Recordatorios en segundo plano (ya no hay cola de sincronización: la hace Firestore)
     implementation("androidx.work:work-runtime-ktx:2.12.0")
-
-    // DataStore
-    implementation("androidx.datastore:datastore-preferences:1.2.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")

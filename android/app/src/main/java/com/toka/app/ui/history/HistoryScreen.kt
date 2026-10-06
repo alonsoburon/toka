@@ -41,7 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.R
-import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.model.TaskDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.EmptyState

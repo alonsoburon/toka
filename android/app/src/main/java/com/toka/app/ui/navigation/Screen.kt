@@ -1,10 +1,11 @@
 package com.toka.app.ui.navigation
 
 sealed class Screen(val route: String) {
-    object Join : Screen("onboarding/join")
+    object Login : Screen("login")
+    object HouseholdSetup : Screen("household-setup")
     object Dashboard : Screen("dashboard")
     object TaskDetail : Screen("task/{taskId}") {
-        fun withId(id: Long) = "task/$id"
+        fun withId(id: String) = "task/$id"
     }
     object CreateTemplate : Screen("create-template")
     object Templates : Screen("templates")

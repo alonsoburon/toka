@@ -67,8 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toka.app.R
-import com.toka.app.data.api.PersonDTO
-import com.toka.app.data.api.encodeMagicInvite
+import com.toka.app.data.model.PersonDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.tokaViewModel
 import com.toka.app.ui.components.LoadingShimmer
@@ -86,28 +85,22 @@ import com.toka.app.ui.theme.parseHexColor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PeopleScreen() {
-    val viewModel = tokaViewModel { PeopleViewModel(AppContainer.instance.peopleRepository, AppContainer.instance.tokenStore) }
+    val viewModel = tokaViewModel {
+        PeopleViewModel(AppContainer.instance.householdRepository, AppContainer.instance.authRepository)
+    }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val serverUrl by AppContainer.instance.tokenStore.serverUrl.collectAsState(initial = null)
-    val householdName by AppContainer.instance.tokenStore.householdName.collectAsState(initial = null)
 
-    val encodedInvite = encodeMagicInvite(
-        server = serverUrl ?: "",
-        code = uiState.inviteCode,
-        household = householdName ?: ""
-    )
+    val inviteCode = uiState.inviteCode
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val copiedMessage = stringResource(R.string.people_copied)
     val regenDoneMessage = stringResource(R.string.people_regen_done)
-    val shareText = stringResource(R.string.people_share_text, encodedInvite)
+    val shareText = stringResource(R.string.people_share_text, inviteCode)
 
-    var showAddDialog by remember { mutableStateOf(false) }
     var personToEdit by remember { mutableStateOf<PersonDTO?>(null) }
     var showRegenConfirm by remember { mutableStateOf(false) }
-    var personToDelete by remember { mutableStateOf<PersonDTO?>(null) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let { snackbarHostState.showSnackbar(it) }
@@ -124,15 +117,6 @@ fun PeopleScreen() {
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
-                },
-                actions = {
-                    IconButton(onClick = { showAddDialog = true }) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = stringResource(R.string.people_add_profile),
-                            tint = Pink
-                        )
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceBg),
                 windowInsets = WindowInsets(0, 0, 0, 0)
@@ -184,7 +168,7 @@ fun PeopleScreen() {
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     IconButton(onClick = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("inviteCode", encodedInvite))
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("inviteCode", inviteCode))
                                         scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
                                     }) {
                                         Icon(
@@ -230,7 +214,8 @@ fun PeopleScreen() {
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { personToEdit = person }
+                                // Solo se edita el propio perfil: cada integrante es su propia cuenta.
+                                .clickable(enabled = person.id == uiState.myPersonId) { personToEdit = person }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -264,16 +249,6 @@ fun PeopleScreen() {
                                         .clip(CircleShape)
                                         .background(personColor)
                                 )
-
-                                if (person.id != uiState.myPersonId) {
-                                    IconButton(onClick = { personToDelete = person }) {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = stringResource(R.string.common_delete),
-                                            tint = TextMuted
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -283,20 +258,12 @@ fun PeopleScreen() {
     }
 
     val editing = personToEdit
-    if (showAddDialog || editing != null) {
+    if (editing != null) {
         PersonFormDialog(
             existing = editing,
-            onDismiss = {
-                showAddDialog = false
-                personToEdit = null
-            },
+            onDismiss = { personToEdit = null },
             onConfirm = { name, color, emoji ->
-                if (editing != null) {
-                    viewModel.updatePerson(editing.id, name, color, emoji)
-                } else {
-                    viewModel.addPerson(name, color, emoji)
-                }
-                showAddDialog = false
+                viewModel.updateMyProfile(name, color, emoji)
                 personToEdit = null
             }
         )
@@ -317,25 +284,6 @@ fun PeopleScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { showRegenConfirm = false }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            }
-        )
-    }
-
-    personToDelete?.let { target ->
-        AlertDialog(
-            onDismissRequest = { personToDelete = null },
-            title = { Text(stringResource(R.string.people_delete_title)) },
-            text = { Text(stringResource(R.string.people_delete_message, target.name)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deletePerson(target.id)
-                    personToDelete = null
-                }) { Text(stringResource(R.string.common_delete), color = SkipRed) }
-            },
-            dismissButton = {
-                TextButton(onClick = { personToDelete = null }) {
                     Text(stringResource(R.string.common_cancel))
                 }
             }
@@ -366,23 +314,12 @@ private fun PersonFormDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = stringResource(
-                    if (existing == null) R.string.people_add_profile else R.string.people_edit_title
-                ),
+                text = stringResource(R.string.people_edit_title),
                 fontWeight = FontWeight.SemiBold
             )
         },
         text = {
             Column {
-                if (existing == null) {
-                    Text(
-                        text = stringResource(R.string.people_add_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -456,7 +393,7 @@ private fun PersonFormDialog(
                 enabled = name.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
             ) {
-                Text(stringResource(if (existing == null) R.string.common_add else R.string.common_save))
+                Text(stringResource(R.string.common_save))
             }
         },
         dismissButton = {

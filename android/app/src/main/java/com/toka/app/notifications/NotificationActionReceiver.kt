@@ -16,16 +16,16 @@ import androidx.work.WorkManager
 class NotificationActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        val taskId = intent.getLongExtra(Notifications.EXTRA_TASK_ID, -1L)
+        val taskId = intent.getStringExtra(Notifications.EXTRA_TASK_ID)
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return
-        if (taskId <= 0) return
+        if (taskId.isNullOrBlank()) return
 
         // Expedited: el toque en el botón no debe quedar esperando a la ventana de Doze.
         val request = OneTimeWorkRequestBuilder<TaskActionWorker>()
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setInputData(
                 Data.Builder()
-                    .putLong(TaskActionWorker.KEY_TASK_ID, taskId)
+                    .putString(TaskActionWorker.KEY_TASK_ID, taskId)
                     .putString(TaskActionWorker.KEY_ACTION, action)
                     .build()
             )

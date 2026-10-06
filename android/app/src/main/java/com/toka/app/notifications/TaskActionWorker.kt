@@ -17,8 +17,8 @@ class TaskActionWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val taskId = inputData.getLong(KEY_TASK_ID, -1L)
-        if (taskId <= 0) return Result.failure()
+        val taskId = inputData.getString(KEY_TASK_ID)
+        if (taskId.isNullOrBlank()) return Result.failure()
 
         val repository = AppContainer.instance.taskRepository
         val outcome = when (inputData.getString(KEY_ACTION)) {

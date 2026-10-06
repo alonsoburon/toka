@@ -64,10 +64,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.toka.app.R
-import com.toka.app.data.api.CreateTemplateRequest
+import com.toka.app.data.model.CreateTemplateRequest
 import com.toka.app.ui.components.ReminderTimesField
 import com.toka.app.ui.components.normalizeReminders
-import com.toka.app.data.api.PersonDTO
+import com.toka.app.data.model.PersonDTO
 import com.toka.app.data.di.AppContainer
 import com.toka.app.ui.theme.CardBg
 import com.toka.app.ui.theme.Pink
@@ -90,7 +90,7 @@ fun CreateTemplateScreen(
     var selectedDays by remember { mutableIntStateOf(7) }
     var customDaysInput by remember { mutableStateOf("") }
     var showCustomDialog by remember { mutableStateOf(false) }
-    var selectedPersonId by remember { mutableStateOf<Long?>(null) }
+    var selectedPersonId by remember { mutableStateOf<String?>(null) }
 
     var people by remember { mutableStateOf<List<PersonDTO>>(emptyList()) }
     var isLoadingPeople by remember { mutableStateOf(true) }
@@ -105,7 +105,7 @@ fun CreateTemplateScreen(
     // Flow y no lectura puntual: si el primer sync llega después de abrir la pantalla, la
     // lista de personas se llena sola en vez de quedar vacía.
     LaunchedEffect(Unit) {
-        AppContainer.instance.peopleRepository.people.collect {
+        AppContainer.instance.householdRepository.people.collect {
             people = it
             isLoadingPeople = false
         }

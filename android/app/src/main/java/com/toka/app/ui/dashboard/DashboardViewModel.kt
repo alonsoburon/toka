@@ -2,7 +2,7 @@ package com.toka.app.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.model.TaskDTO
 import com.toka.app.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** Última tarea resuelta, para ofrecer "Deshacer" mientras el snackbar está visible. */
-data class CompletedAction(val taskId: Long, val name: String)
+data class CompletedAction(val taskId: String, val name: String)
 
 data class DashboardUiState(
     val tasks: List<TaskDTO> = emptyList(),
@@ -52,11 +52,11 @@ class DashboardViewModel(
         }
     }
 
-    fun completeTask(taskId: Long) = resolve(taskId, "done")
+    fun completeTask(taskId: String) = resolve(taskId, "done")
 
-    fun skipTask(taskId: Long) = resolve(taskId, "skipped")
+    fun skipTask(taskId: String) = resolve(taskId, "skipped")
 
-    private fun resolve(taskId: Long, status: String) {
+    private fun resolve(taskId: String, status: String) {
         val name = _uiState.value.tasks.firstOrNull { it.id == taskId }?.templateName ?: "Tarea"
         viewModelScope.launch {
             val result = if (status == "done") {

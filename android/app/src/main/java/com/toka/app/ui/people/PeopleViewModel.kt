@@ -2,103 +2,55 @@ package com.toka.app.ui.people
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.toka.app.data.TokenStore
-import com.toka.app.data.api.PersonDTO
-import com.toka.app.data.repository.PeopleRepository
+import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.repository.AuthRepository
+import com.toka.app.data.repository.HouseholdRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class PeopleUiState(
     val people: List<PersonDTO> = emptyList(),
     val inviteCode: String = "",
-    val myPersonId: Long? = null,
+    val myPersonId: String? = null,
     val isLoading: Boolean = true,
     val error: String? = null
 )
 
 class PeopleViewModel(
-    private val peopleRepository: PeopleRepository,
-    private val tokenStore: TokenStore
+    private val household: HouseholdRepository,
+    private val auth: AuthRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(PeopleUiState())
+    private val _uiState = MutableStateFlow(PeopleUiState(myPersonId = auth.current?.uid))
     val uiState: StateFlow<PeopleUiState> = _uiState.asStateFlow()
 
     init {
-        // Room es la fuente de verdad: la lista se redibuja sola cuando entra un sync.
+        // Firestore es la fuente de verdad: la lista se redibuja sola cuando cambia el hogar.
         viewModelScope.launch {
-            peopleRepository.people.collect { people ->
+            household.people.collect { people ->
                 _uiState.update { it.copy(people = people, isLoading = false) }
             }
         }
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    inviteCode = tokenStore.inviteCode.first() ?: "",
-                    myPersonId = tokenStore.getPersonId()
-                )
+            household.household.collect { h ->
+                _uiState.update { it.copy(inviteCode = h?.inviteCode ?: "") }
             }
         }
     }
 
-    fun addPerson(name: String, color: String, emoji: String) {
-        viewModelScope.launch {
-            val hid = tokenStore.getHouseholdId()
-            if (hid == null) {
-                _uiState.update { it.copy(error = "No hay hogar activo") }
-                return@launch
-            }
-            peopleRepository.addPerson(hid, name, color, emoji)
-                .onFailure { e ->
-                    _uiState.update { it.copy(error = e.message ?: "Error al añadir persona") }
-                }
-        }
-    }
-
-    fun updatePerson(id: Long, name: String, color: String, emoji: String) {
-        viewModelScope.launch {
-            peopleRepository.updatePerson(id, name, color, emoji)
-                .onSuccess {
-                    // Si me edité a mí, el header del Dashboard lee del TokenStore.
-                    if (id == tokenStore.getPersonId()) {
-                        tokenStore.updateProfile(name, color, emoji)
-                    }
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(error = e.message ?: "Error al guardar persona") }
-                }
-        }
-    }
-
-    fun deletePerson(id: Long) {
-        viewModelScope.launch {
-            peopleRepository.deletePerson(id)
-                .onFailure { e ->
-                    _uiState.update { it.copy(error = e.message ?: "Error al eliminar persona") }
-                }
-        }
+    fun updateMyProfile(name: String, color: String, emoji: String) {
+        val uid = auth.current?.uid ?: return
+        household.updateMyProfile(uid, name, color, emoji)
     }
 
     fun regenerateInvite(onSuccess: (String) -> Unit) {
         viewModelScope.launch {
-            val hid = tokenStore.getHouseholdId()
-            if (hid == null) {
-                _uiState.update { it.copy(error = "No hay hogar activo") }
-                return@launch
-            }
-            peopleRepository.regenerateInvite(hid)
-                .onSuccess { newCode ->
-                    tokenStore.saveInviteCode(newCode)
-                    _uiState.update { it.copy(inviteCode = newCode) }
-                    onSuccess(newCode)
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(error = e.message ?: "Error al regenerar código") }
-                }
+            household.regenerateInvite()
+                .onSuccess { newCode -> onSuccess(newCode) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message ?: "Error al regenerar código") } }
         }
     }
 }

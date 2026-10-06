@@ -33,3 +33,11 @@ android/keystore.properties
 *.swo
 *~
 .DS_Store
+
+# Firebase
+android/app/google-services.json
+android/app/src/release/google-services.json
+.emulador/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

@@ -130,9 +130,7 @@
 
     <!-- Personas -->
     <string name="people_title">Personas</string>
-    <string name="people_add_profile">Añadir perfil</string>
     <string name="people_edit_title">Editar persona</string>
-    <string name="people_add_hint">Crea un perfil para asignarle tareas aunque no use la app. Para darle acceso, comparte el código de invitación.</string>
     <string name="people_invite_title">Código de invitación</string>
     <string name="people_invite_empty">---</string>
     <string name="people_copied">Código copiado</string>
@@ -143,8 +141,6 @@
     <string name="people_regen_title">Generar nuevo código</string>
     <string name="people_regen_message">El código actual dejará de funcionar para quien no se haya unido todavía.</string>
     <string name="people_regen_done">Nuevo código generado</string>
-    <string name="people_delete_title">Eliminar persona</string>
-    <string name="people_delete_message">¿Eliminar a %1$s? Sus tareas quedan sin asignar.</string>
     <string name="people_name_label">Nombre</string>
     <string name="people_color_label">Color</string>
     <string name="people_avatar_label">Avatar</string>
@@ -155,34 +151,19 @@
     <string name="settings_name">Nombre</string>
     <string name="settings_code">Código</string>
     <string name="settings_regen">Generar nuevo código</string>
-    <string name="settings_server_title">🔗 Servidor</string>
-    <string name="settings_server_url">URL actual</string>
-    <string name="settings_server_none">No configurada</string>
-    <string name="settings_change_server">Cambiar servidor</string>
     <string name="settings_leave">Salir del hogar</string>
     <string name="settings_leave_title">Salir del hogar</string>
     <string name="settings_leave_message">Se eliminará tu persona del hogar y tus tareas quedarán sin asignar. Necesita conexión.</string>
     <string name="settings_leave_confirm">Salir</string>
     <string name="settings_logout">Cerrar sesión (solo este teléfono)</string>
-    <string name="settings_server_prompt">Ingresa la nueva URL del servidor:</string>
-    <string name="settings_server_label">URL del servidor</string>
-    <string name="settings_server_failed">No se pudo conectar: revisa la URL y que el server esté arriba</string>
-    <string name="settings_testing">Probando…</string>
     <string name="settings_leave_failed">No se pudo salir del hogar</string>
     <string name="settings_default_household">Mi hogar</string>
 
     <!-- Onboarding -->
     <string name="onboarding_create_subtitle">Crea tu hogar y empieza de cero</string>
-    <string name="onboarding_join_subtitle">Pega el código que te compartieron</string>
+    <string name="onboarding_join_subtitle">Ingresa el código de 6 caracteres que te compartieron</string>
     <string name="onboarding_join_tab">Unirse</string>
     <string name="onboarding_create_tab">Crear</string>
-    <string name="onboarding_token_tab">Token</string>
-    <string name="onboarding_token_subtitle">Entra con una identidad ya existente</string>
-    <string name="onboarding_token_label">Token de acceso</string>
-    <string name="onboarding_token_hint">El token que te dio el servidor (por ejemplo, el del seed).</string>
-    <string name="onboarding_token_enter">Entrar con token</string>
-    <string name="onboarding_server_label">Servidor</string>
-    <string name="onboarding_server_hint">URL del backend, p. ej. https://toka.nuxapower.cl</string>
     <string name="onboarding_household_name">Nombre del hogar</string>
     <string name="onboarding_household_placeholder">Casa de los Gómez</string>
     <string name="onboarding_code_label">Código</string>
@@ -191,10 +172,14 @@
     <string name="onboarding_color_label">Tu color</string>
     <string name="onboarding_avatar_label">Tu avatar</string>
     <string name="onboarding_preview_caption">Así te verán en el hogar</string>
+    <string name="login_subtitle">Tareas del hogar, compartidas</string>
+    <string name="login_google">Entrar con Google</string>
+    <string name="login_error">No se pudo iniciar sesión: %1$s</string>
+    <string name="household_code_hint">Ej.: K7M2QX</string>
+    <string name="household_sign_out">Entrar con otra cuenta</string>
     <string name="onboarding_enter">Entrar</string>
     <string name="onboarding_create">Crear hogar</string>
     <string name="onboarding_invalid_code">El código no es válido</string>
-    <string name="onboarding_connect_error">No se pudo conectar al servidor: %1$s</string>
 
     <!-- Notificaciones -->
     <string name="notif_channel_name">Recordatorios</string>

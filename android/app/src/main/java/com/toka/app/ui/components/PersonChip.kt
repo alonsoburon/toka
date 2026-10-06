@@ -23,7 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.toka.app.data.api.PersonDTO
+import com.toka.app.data.model.PersonDTO
 import com.toka.app.ui.theme.Pink
 import com.toka.app.ui.theme.TextMuted
 import com.toka.app.ui.theme.colorForPerson
@@ -36,7 +36,7 @@ fun PersonChip(
     modifier: Modifier = Modifier
 ) {
     val personColor = if (person.color.isNotBlank()) parseHexColor(person.color)
-    else colorForPerson((person.id % 7).toInt())
+    else colorForPerson(Math.floorMod(person.id.hashCode(), 7))
 
     PersonChip(
         emoji = person.avatarEmoji,
@@ -148,7 +148,7 @@ fun CompactPersonChip(
     modifier: Modifier = Modifier
 ) {
     val personColor = if (person.color.isNotBlank()) parseHexColor(person.color)
-    else colorForPerson((person.id % 7).toInt())
+    else colorForPerson(Math.floorMod(person.id.hashCode(), 7))
 
     Row(
         modifier = modifier,

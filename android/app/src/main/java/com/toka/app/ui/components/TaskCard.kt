@@ -20,7 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.toka.app.R
-import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.model.TaskDTO
 import com.toka.app.data.isoToLocalDate
 import com.toka.app.ui.theme.*
 import java.time.Instant

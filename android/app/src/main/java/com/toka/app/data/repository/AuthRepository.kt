@@ -1,113 +1,41 @@
 package com.toka.app.data.repository
 
-import com.toka.app.data.suspendCatching
-import com.toka.app.data.TokenStore
-import com.toka.app.data.api.CreateHouseholdRequest
-import com.toka.app.data.api.CreateHouseholdResponse
-import com.toka.app.data.api.JoinHouseholdRequest
-import com.toka.app.data.api.JoinHouseholdResponse
-import com.toka.app.data.api.MeResponse
-import com.toka.app.data.api.TokaApi
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
+import org.json.JSONObject
 
-class AuthRepository(
-    private val api: () -> TokaApi,
-    private val tokenStore: TokenStore
-) {
+class AuthRepository(private val auth: FirebaseAuth) {
 
-    /**
-     * Entra a un hogar existente con un invite code.
-     */
-    suspend fun joinHousehold(
-        inviteCode: String,
-        name: String,
-        color: String,
-        emoji: String,
-        householdName: String
-    ): Result<JoinHouseholdResponse> = suspendCatching {
-        val response = api().joinHousehold(
-            JoinHouseholdRequest(inviteCode, name, color, emoji)
-        )
-        tokenStore.saveSession(
-            token = response.token,
-            name = name,
-            emoji = emoji,
-            color = color,
-            personId = response.personId,
-            householdId = response.householdId.toString(),
-            householdName = householdName,
-            inviteCode = inviteCode
-        )
-        response
+    val user: Flow<FirebaseUser?> = callbackFlow {
+        val listener = FirebaseAuth.AuthStateListener { trySend(it.currentUser) }
+        auth.addAuthStateListener(listener)
+        awaitClose { auth.removeAuthStateListener(listener) }
+    }
+
+    val current: FirebaseUser? get() = auth.currentUser
+
+    suspend fun signInWithGoogle(idToken: String) {
+        auth.signInWithCredential(GoogleAuthProvider.getCredential(idToken, null)).await()
     }
 
     /**
-     * Crea un hogar desde cero. La primera persona nace como admin y recibe su token
-     * en la misma respuesta; a partir de ahí todo funciona igual que al unirse.
+     * Solo desarrollo local: el emulador de Auth acepta un ID token de Google falso (JSON sin firmar),
+     * así se entra como [email] sin cuenta real. Contra Firebase real esto falla.
      */
-    suspend fun createHousehold(
-        householdName: String,
-        name: String,
-        color: String,
-        emoji: String
-    ): Result<CreateHouseholdResponse> = suspendCatching {
-        val response = api().createHousehold(
-            CreateHouseholdRequest(
-                name = householdName,
-                adminName = name,
-                adminColor = color,
-                adminEmoji = emoji
-            )
-        )
-        tokenStore.saveSession(
-            token = response.token,
-            name = name,
-            emoji = emoji,
-            color = color,
-            personId = response.personId,
-            householdId = response.id.toString(),
-            householdName = response.name,
-            inviteCode = response.inviteCode
-        )
-        response
+    suspend fun signInDev(email: String, name: String) {
+        val fakeToken = JSONObject()
+            .put("sub", "dev-" + email.substringBefore('@'))
+            .put("email", email)
+            .put("email_verified", true)
+            .put("name", name)
+            .toString()
+        auth.signInWithCredential(GoogleAuthProvider.getCredential(fakeToken, null)).await()
     }
 
-    /**
-     * Entra con un token ya emitido (por ejemplo el del seed). Es el camino que hace
-     * persistente una identidad concreta: aunque se recree la base, el token del seed
-     * sigue resolviendo a la misma persona.
-     */
-    suspend fun loginWithToken(token: String): Result<MeResponse> = suspendCatching {
-        val me = api().me("Bearer $token")
-        tokenStore.saveSession(
-            token = token,
-            name = me.person.name,
-            emoji = me.person.avatarEmoji,
-            color = me.person.color,
-            personId = me.person.id,
-            householdId = me.household.id.toString(),
-            householdName = me.household.name,
-            inviteCode = me.household.inviteCode ?: ""
-        )
-        me
-    }
-
-    /**
-     * Borra la propia persona del hogar. A diferencia de cerrar sesión, el token deja
-     * de existir en el servidor. Requiere conexión.
-     */
-    suspend fun leaveHousehold(): Result<Unit> = suspendCatching {
-        val householdId = tokenStore.getHouseholdId() ?: error("No hay hogar activo")
-        val token = tokenStore.tokenFlow.first() ?: error("Sin sesión")
-        val response = api().leaveHousehold(householdId, "Bearer $token")
-        if (!response.isSuccessful) {
-            error("No se pudo salir del hogar (${response.code()})")
-        }
-        tokenStore.clearSession()
-    }
-
-    fun isLoggedIn(): Flow<Boolean> = tokenStore.isLoggedIn
-
-    suspend fun logout() { tokenStore.clearSession() }
+    fun signOut() = auth.signOut()
 }

@@ -1,389 +1,386 @@
 package com.toka.app.data.repository
 
-import android.content.Context
+import android.util.Log
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.Source
+import com.toka.app.data.SessionCache
+import com.toka.app.data.firebase.asFlow
+import com.toka.app.data.firebase.nextTaskId
+import com.toka.app.data.firebase.retryOnPermissionDenied
+import com.toka.app.data.firebase.tasks
+import com.toka.app.data.firebase.templates
+import com.toka.app.data.firebase.toIso
+import com.toka.app.data.firebase.toTask
+import com.toka.app.data.firebase.toTemplate
+import com.toka.app.data.firebase.toTimestamp
+import com.toka.app.data.isoToLocalDate
+import com.toka.app.data.model.CompleteTaskResponse
+import com.toka.app.data.model.CreateTemplateRequest
+import com.toka.app.data.model.PersonDTO
+import com.toka.app.data.model.TaskDTO
+import com.toka.app.data.model.TemplateDTO
+import com.toka.app.data.model.UpdateTemplateRequest
 import com.toka.app.data.suspendCatching
-import com.toka.app.data.api.CompleteTaskResponse
-import com.toka.app.data.api.CreateTemplateRequest
-import com.toka.app.data.api.TaskDTO
-import com.toka.app.data.api.TemplateDTO
-import com.toka.app.data.api.UpdateTemplateRequest
-import com.toka.app.data.local.PersonEntity
-import com.toka.app.data.local.TaskEntity
-import com.toka.app.data.local.TemplateEntity
-import com.toka.app.data.local.TokaDao
-import com.toka.app.data.sync.SyncEngine
-import com.toka.app.data.sync.SyncWorker
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import java.time.Instant
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 
 /**
- * Lee de SQLite y escribe en SQLite. La red no aparece en ningún camino que la
- * interfaz tenga que esperar.
+ * Tareas y plantillas sobre Firestore. Las lecturas son listeners en tiempo real (Flow) que sirven
+ * primero la caché local; las escrituras se aplican a la caché al instante y Firestore las sube
+ * cuando hay red, así que NINGUNA escritura espera a la red (no se hace `await` del commit).
  *
- * Una escritura hace dos cosas: aplica el cambio localmente para que la pantalla lo
- * refleje ya, y lo encola. Si la app se cierra en ese instante, la cola sigue ahí al
- * volver a abrirla.
- *
- * Se conservan las firmas `suspend ... Result<...>` que ya usaban los ViewModels
- * —ahora resueltas contra la base local— y se añaden las versiones Flow, que son las
- * que conviene usar de aquí en adelante: se actualizan solas cuando entra un sync.
+ * La recurrencia vive aquí, en el cliente: al resolver una tarea recurrente, el mismo lote crea la
+ * siguiente con un id determinista ([nextTaskId]). Dos teléfonos que completan la misma tarea sin
+ * conexión escriben el mismo documento y no se duplica.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class TaskRepository(
-    private val dao: TokaDao,
-    private val sync: SyncEngine,
-    private val appContext: Context
+    private val db: FirebaseFirestore,
+    private val session: SessionRepository,
+    private val household: HouseholdRepository,
+    private val cache: SessionCache
 ) {
+    private val householdId: Flow<String?> = session.session
+        .map { (it as? Session.InHousehold)?.householdId }
+        .distinctUntilChanged()
+
+    private val peopleById: Flow<Map<String, PersonDTO>> = household.people.map { list -> list.associateBy { it.id } }
 
     // ── Lecturas reactivas ────────────────────────────────────────────────────
 
-    val pendingTasks: Flow<List<TaskDTO>> =
-        combine(dao.pendingTasks(nowIso()), dao.people()) { tasks, people ->
-            tasks.map { it.toDto(people) }
-        }
-
-    val history: Flow<List<TaskDTO>> =
-        combine(dao.history(), dao.people()) { tasks, people ->
-            tasks.map { it.toDto(people) }
-        }
-
-    val templates: Flow<List<TemplateDTO>> =
-        dao.activeTemplates().map { list -> list.map { it.toDto() } }
-
-    /** Escrituras esperando para subir. Para el indicador de "sin sincronizar". */
-    val pendingSyncCount: Flow<Int> = sync.pendingCount
-
-    fun taskFlow(taskId: Long): Flow<TaskDTO?> =
-        combine(dao.task(taskId), dao.people()) { task, people -> task?.toDto(people) }
-
-    // ── Lecturas puntuales (compatibilidad con los ViewModels actuales) ───────
-
-    suspend fun getPendingTasks(): Result<List<TaskDTO>> = suspendCatching {
-        val people = dao.peopleOnce()
-        dao.pendingTasksOnce(nowIso()).map { it.toDto(people) }
+    /** Pendientes, la más próxima (o más atrasada) primero. */
+    val pendingTasks: Flow<List<TaskDTO>> = householdId.flatMapLatest { hid ->
+        if (hid == null) flowOf(emptyList())
+        else combine(
+            db.tasks(hid).whereEqualTo("status", "pending").asFlow(metadata = true),
+            peopleById
+        ) { snap, people -> snap.documents.map { it.toTask(people) }.sortedBy { it.dueAt } }
+            .retryOnPermissionDenied()
+            .catch { Log.w(TAG, "pendientes", it); emit(emptyList()) }
     }
 
-    suspend fun getHistory(days: Int = 30): Result<List<TaskDTO>> = suspendCatching {
-        val cutoff = Instant.now().minus(days.toLong(), ChronoUnit.DAYS)
-        val people = dao.peopleOnce()
-        dao.historyOnce()
-            .filter { row ->
-                val at = row.completedAt?.let { suspendCatching { Instant.parse(it) }.getOrNull() }
-                at == null || at.isAfter(cutoff)
+    /** Resueltas del último año, la más reciente primero. La UI filtra por la ventana que elija. */
+    val history: Flow<List<TaskDTO>> = householdId.flatMapLatest { hid ->
+        if (hid == null) flowOf(emptyList())
+        else {
+            val cutoff = Timestamp(Timestamp.now().seconds - HISTORY_DAYS * 86_400L, 0)
+            combine(
+                db.tasks(hid).whereGreaterThanOrEqualTo("completedAt", cutoff)
+                    .orderBy("completedAt", Query.Direction.DESCENDING).asFlow(metadata = true),
+                peopleById
+            ) { snap, people -> snap.documents.map { it.toTask(people) } }
+                .retryOnPermissionDenied()
+                .catch { Log.w(TAG, "historial", it); emit(emptyList()) }
+        }
+    }
+
+    val templates: Flow<List<TemplateDTO>> = householdId.flatMapLatest { hid ->
+        if (hid == null) flowOf(emptyList())
+        else db.templates(hid).whereEqualTo("isActive", true).asFlow()
+            .map { snap -> snap.documents.map { it.toTemplate() }.sortedBy { it.name.lowercase() } }
+            .retryOnPermissionDenied()
+            .catch { Log.w(TAG, "plantillas", it); emit(emptyList()) }
+    }
+
+    /** Cuántas escrituras locales esperan confirmación del servidor (indicador "sin sincronizar"). */
+    val pendingSyncCount: Flow<Int> = combine(pendingTasks, history) { a, b ->
+        a.count { it.pendingSync } + b.count { it.pendingSync }
+    }
+
+    fun taskFlow(taskId: String): Flow<TaskDTO?> = householdId.flatMapLatest { hid ->
+        if (hid == null) flowOf(null)
+        else combine(db.tasks(hid).document(taskId).asFlow(metadata = true), peopleById) { snap, people ->
+            if (snap.exists()) snap.toTask(people) else null
+        }.retryOnPermissionDenied().catch { emit(null) }
+    }
+
+    // ── Escrituras ────────────────────────────────────────────────────────────
+
+    suspend fun completeTask(taskId: String, notes: String? = null): Result<CompleteTaskResponse> =
+        resolve(taskId, "done", notes)
+
+    suspend fun skipTask(taskId: String): Result<CompleteTaskResponse> = resolve(taskId, "skipped", null)
+
+    private suspend fun resolve(taskId: String, newStatus: String, notes: String?): Result<CompleteTaskResponse> =
+        suspendCatching {
+            val (uid, hid) = identity()
+            val taskRef = db.tasks(hid).document(taskId)
+            val task = fetch(taskRef) ?: error("task $taskId not found")
+            check(task.getString("status") == "pending") { "task $taskId already resolved" }
+            val template = task.getString("templateId")?.let { fetch(db.templates(hid).document(it)) }
+
+            val now = Timestamp.now()
+            val batch = db.batch()
+            val changes = mutableMapOf<String, Any?>(
+                "status" to newStatus,
+                "completedById" to uid,
+                "completedAt" to now,
+                "updatedAt" to now
+            )
+            if (notes != null) changes["notes"] = notes
+            batch.update(taskRef, changes)
+
+            // Recurrencia: la próxima vence desde el momento de completar, no desde el vencimiento original.
+            var nextDue: Timestamp? = null
+            val days = template?.getLong("recurrenceDays")?.toInt()
+            if (template != null && days != null && template.getBoolean("isActive") != false) {
+                nextDue = Timestamp(now.seconds + days * 86_400L, now.nanoseconds)
+                batch.set(
+                    db.tasks(hid).document(nextTaskId(taskId)),
+                    taskData(
+                        templateId = template.id,
+                        templateName = template.getString("name"),
+                        dueAt = nextDue,
+                        assignedToId = template.getString("preferredAssigneeId"),
+                        uid = uid,
+                        now = now
+                    ) + ("generatedFrom" to taskId)
+                )
             }
-            .map { it.toDto(people) }
-    }
-
-    suspend fun getTemplates(): Result<List<TemplateDTO>> = suspendCatching {
-        dao.activeTemplatesOnce().map { it.toDto() }
-    }
-
-    suspend fun getTask(taskId: Long): Result<TaskDTO> = suspendCatching {
-        val people = dao.peopleOnce()
-        dao.taskOnce(taskId)?.toDto(people) ?: error("task $taskId not found")
-    }
-
-    suspend fun getTemplate(templateId: Long): Result<TemplateDTO> = suspendCatching {
-        dao.activeTemplatesOnce().firstOrNull { it.id == templateId }?.toDto()
-            ?: error("template $templateId not found")
-    }
-
-    // ── Escrituras: locales primero, cola después ─────────────────────────────
-
-    suspend fun completeTask(taskId: Long, notes: String? = null): Result<CompleteTaskResponse> =
-        resolve(taskId, "done", "task.complete", notes)
-
-    suspend fun skipTask(taskId: Long): Result<CompleteTaskResponse> =
-        resolve(taskId, "skipped", "task.skip", null)
+            send(batch.commit(), "resolver $taskId")
+            CompleteTaskResponse(status = newStatus, nextDueAt = nextDue?.toIso())
+        }
 
     /**
-     * Deshace un completado/saltado reciente. Vuelve la tarea a pending localmente y
-     * encola `task.uncomplete`, que en el servidor además borra la instancia que la
-     * recurrencia había generado.
+     * Deshace un completado/saltado: la tarea vuelve a pendiente y, si la recurrencia había generado
+     * la siguiente y sigue pendiente, se borra.
      */
-    suspend fun undoTask(taskId: Long): Result<Unit> = suspendCatching {
-        val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
-        dao.upsertTask(
-            row.copy(
-                status = "pending",
-                completedAt = null,
-                pending = true
-            )
-        )
-        sync.enqueue("task.uncomplete", buildJsonObject { put("id", JsonPrimitive(taskId)) })
-        sync.kick(appContext)
+    suspend fun undoTask(taskId: String): Result<Unit> = suspendCatching {
+        val (_, hid) = identity()
+        val taskRef = db.tasks(hid).document(taskId)
+        val nextRef = db.tasks(hid).document(nextTaskId(taskId))
+        val next = fetch(nextRef)
+        val now = Timestamp.now()
+        val batch = db.batch()
+        batch.update(taskRef, mapOf("status" to "pending", "completedById" to null, "completedAt" to null, "updatedAt" to now))
+        if (next != null && next.getString("status") == "pending") batch.delete(nextRef)
+        send(batch.commit(), "deshacer $taskId")
     }
 
-    private suspend fun resolve(
-        taskId: Long,
-        newStatus: String,
-        op: String,
-        notes: String?
-    ): Result<CompleteTaskResponse> = suspendCatching {
-        val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
-        val now = Instant.now().toString()
-
-        dao.upsertTask(
-            row.copy(
-                status = newStatus,
-                completedAt = now,
-                notes = notes ?: row.notes,
-                pending = true
-            )
-        )
-
-        // completed_at viaja con la mutación: la tarea se marcó ahora, no cuando el
-        // teléfono recupere señal. El servidor calcula desde ese momento la próxima
-        // instancia, así que estar tres días sin conexión no corre la recurrencia.
-        sync.enqueue(op, buildJsonObject {
-            put("id", JsonPrimitive(taskId))
-            put("completed_at", JsonPrimitive(now))
-            put("notes", notes?.let { JsonPrimitive(it) } ?: JsonNull)
-        })
-        sync.kick(appContext)
-
-        CompleteTaskResponse(status = newStatus, nextDueAt = null)
-    }
-
+    /** Campos en null = no tocar. */
     suspend fun updateTask(
-        taskId: Long,
-        assignedToId: Long? = null,
+        taskId: String,
+        assignedToId: String? = null,
         notes: String? = null,
         dueAt: String? = null
     ): Result<Unit> = suspendCatching {
-        val row = dao.taskOnce(taskId) ?: error("task $taskId not found")
-        dao.upsertTask(
-            row.copy(
-                assignedToId = assignedToId ?: row.assignedToId,
-                notes = notes ?: row.notes,
-                dueAt = dueAt ?: row.dueAt,
-                pending = true
-            )
-        )
-        sync.enqueue("task.update", buildJsonObject {
-            put("id", JsonPrimitive(taskId))
-            put("assigned_to_id", assignedToId?.let { JsonPrimitive(it) } ?: JsonNull)
-            put("notes", notes?.let { JsonPrimitive(it) } ?: JsonNull)
-            put("due_at", dueAt?.let { JsonPrimitive(it) } ?: JsonNull)
-        })
-        sync.kick(appContext)
+        val (_, hid) = identity()
+        val changes = mutableMapOf<String, Any?>("updatedAt" to Timestamp.now())
+        if (assignedToId != null) changes["assignedToId"] = assignedToId
+        if (notes != null) changes["notes"] = notes
+        if (dueAt != null) changes["dueAt"] = dueAt.toTimestamp()
+        send(db.tasks(hid).document(taskId).update(changes), "editar $taskId")
     }
 
     suspend fun createTemplate(request: CreateTemplateRequest): Result<TemplateDTO> = suspendCatching {
-        val clientId = sync.newClientId()
-        val provisionalId = sync.provisionalIdFor(clientId)
+        val (uid, hid) = identity()
+        val now = Timestamp.now()
+        val templateRef = db.templates(hid).document()
+        val days = request.recurrenceDays
+        val preferred = request.preferredAssigneeId
 
-        // Se inserta con un id negativo para que la pantalla la muestre al instante.
-        // Cuando el servidor la confirme llegará con su id real y la provisional se
-        // borra en la reconciliación del pull.
-        val local = TemplateEntity(
-            id = provisionalId,
-            householdId = 0,
-            name = request.name,
-            description = request.description,
-            recurrenceDays = request.recurrenceDays,
-            preferredAssigneeId = request.preferredAssigneeId,
-            reminderTimes = request.reminderTimes,
-            isActive = true,
-            rowVersion = 0,
-            clientId = clientId,
-            pending = true
+        val batch = db.batch()
+        batch.set(
+            templateRef,
+            mapOf(
+                "name" to request.name.trim(),
+                "description" to request.description?.takeIf { it.isNotBlank() },
+                "recurrenceDays" to days,
+                "preferredAssigneeId" to preferred,
+                "reminderTimes" to request.reminderTimes?.takeIf { it.isNotBlank() },
+                "isActive" to true,
+                "createdBy" to uid,
+                "createdAt" to now,
+                "updatedAt" to now
+            )
         )
-        dao.upsertTemplate(local)
-
-        sync.enqueue("template.create", buildJsonObject {
-            put("client_id", JsonPrimitive(clientId))
-            put("name", JsonPrimitive(request.name))
-            put("description", request.description?.let { JsonPrimitive(it) } ?: JsonNull)
-            put("recurrence_days", request.recurrenceDays?.let { JsonPrimitive(it) } ?: JsonNull)
-            put(
-                "preferred_assignee_id",
-                request.preferredAssigneeId?.let { JsonPrimitive(it) } ?: JsonNull
-            )
-            put("reminder_times", request.reminderTimes?.let { JsonPrimitive(it) } ?: JsonNull)
-        })
-        sync.kick(appContext)
-
-        local.toDto()
+        // La primera instancia vence en la recurrencia (o en 7 días si es de una sola vez).
+        val due = Timestamp(now.seconds + (days ?: DEFAULT_DUE_DAYS) * 86_400L, now.nanoseconds)
+        batch.set(
+            db.tasks(hid).document(),
+            taskData(templateRef.id, request.name.trim(), due, preferred, uid, now)
+        )
+        send(batch.commit(), "crear plantilla")
+        TemplateDTO(
+            id = templateRef.id,
+            name = request.name.trim(),
+            description = request.description,
+            recurrenceDays = days,
+            preferredAssigneeId = preferred,
+            reminderTimes = request.reminderTimes,
+            isActive = true
+        )
     }
 
-    suspend fun updateTemplate(id: Long, request: UpdateTemplateRequest): Result<TemplateDTO> =
-        suspendCatching {
-            val row = dao.activeTemplatesOnce().firstOrNull { it.id == id }
-                ?: error("template $id not found")
-            val updated = row.copy(
-                name = request.name ?: row.name,
-                description = request.description ?: row.description,
-                recurrenceDays = request.recurrenceDays ?: row.recurrenceDays,
-                preferredAssigneeId = request.preferredAssigneeId ?: row.preferredAssigneeId,
-                reminderTimes = request.reminderTimes ?: row.reminderTimes,
-                pending = true
-            )
-            dao.upsertTemplate(updated)
+    suspend fun updateTemplate(id: String, request: UpdateTemplateRequest): Result<Unit> = suspendCatching {
+        val (_, hid) = identity()
+        val templateRef = db.templates(hid).document(id)
+        val changes = mutableMapOf<String, Any?>("updatedAt" to Timestamp.now())
+        request.name?.let { changes["name"] = it.trim() }
+        request.description?.let { changes["description"] = it.ifBlank { null } }
+        request.recurrenceDays?.let { changes["recurrenceDays"] = it }
+        request.preferredAssigneeId?.let { changes["preferredAssigneeId"] = it }
+        request.reminderTimes?.let { changes["reminderTimes"] = it.ifBlank { null } }
+        request.isActive?.let { changes["isActive"] = it }
 
-            sync.enqueue("template.update", buildJsonObject {
-                put("id", JsonPrimitive(id))
-                provisionalClientId(row)?.let { put("client_id", JsonPrimitive(it)) }
-                put("name", request.name?.let { JsonPrimitive(it) } ?: JsonNull)
-                put("description", request.description?.let { JsonPrimitive(it) } ?: JsonNull)
-                put(
-                    "recurrence_days",
-                    request.recurrenceDays?.let { JsonPrimitive(it) } ?: JsonNull
-                )
-                put(
-                    "preferred_assignee_id",
-                    request.preferredAssigneeId?.let { JsonPrimitive(it) } ?: JsonNull
-                )
-                put("reminder_times", request.reminderTimes?.let { JsonPrimitive(it) } ?: JsonNull)
-            })
-            sync.kick(appContext)
-
-            updated.toDto()
-        }
-
-    /**
-     * Cambia la recurrencia de una plantilla, incluida la vuelta a "una sola vez".
-     * Va por `template.set_recurrence` y no por `template.update` porque allí un null
-     * significa "no tocar" y no se podría borrar la recurrencia.
-     */
-    suspend fun setTemplateRecurrence(templateId: Long, recurrenceDays: Int?): Result<Unit> =
-        suspendCatching {
-            val row = dao.activeTemplatesOnce().firstOrNull { it.id == templateId }
-                ?: error("template $templateId not found")
-            dao.upsertTemplate(row.copy(recurrenceDays = recurrenceDays, pending = true))
-
-            sync.enqueue("template.set_recurrence", buildJsonObject {
-                put("id", JsonPrimitive(templateId))
-                provisionalClientId(row)?.let { put("client_id", JsonPrimitive(it)) }
-                put("recurrence_days", recurrenceDays?.let { JsonPrimitive(it) } ?: JsonNull)
-            })
-            sync.kick(appContext)
-        }
-
-    suspend fun deleteTemplate(id: Long): Result<Unit> = suspendCatching {
-        val row = dao.activeTemplatesOnce().firstOrNull { it.id == id }
-        dao.deleteTemplate(id)
-        // Sus tareas pendientes se van con ella, sin esperar a que el servidor mande los
-        // tombstones: offline, la tarea de una plantilla borrada no debe seguir en pantalla.
-        dao.deletePendingTasksOfTemplate(id)
-        sync.enqueue("template.delete", buildJsonObject {
-            put("id", JsonPrimitive(id))
-            row?.let { provisionalClientId(it) }?.let { put("client_id", JsonPrimitive(it)) }
-        })
-        sync.kick(appContext)
+        val batch = db.batch()
+        batch.update(templateRef, changes)
+        if (request.isActive == false) retirePending(batch, hid, id)
+        // Si cambia el nombre, las instancias pendientes siguen mostrando el viejo hasta resolverse:
+        // se refrescan para que la lista no quede inconsistente.
+        request.name?.let { newName -> renamePending(batch, hid, id, newName.trim()) }
+        send(batch.commit(), "editar plantilla $id")
     }
 
     /**
-     * Una plantilla creada sin conexión vive con un id negativo; las ediciones que se
-     * encolan antes de que el servidor la confirme llevan su client_id, que es lo único
-     * que el servidor conoce de ella.
+     * Cambia la recurrencia, incluida la vuelta a "una sola vez" (null). Las instancias ya creadas no
+     * cambian; vale desde la próxima que se genere.
      */
-    private fun provisionalClientId(row: TemplateEntity): String? =
-        if (row.id < 0) row.clientId else null
+    suspend fun setTemplateRecurrence(templateId: String, recurrenceDays: Int?): Result<Unit> = suspendCatching {
+        val (_, hid) = identity()
+        send(
+            db.templates(hid).document(templateId)
+                .update(mapOf("recurrenceDays" to recurrenceDays?.takeIf { it > 0 }, "updatedAt" to Timestamp.now())),
+            "recurrencia $templateId"
+        )
+    }
 
-    /** Fuerza un ciclo y espera (para el gesto de deslizar para recargar). */
-    suspend fun refresh(): Result<Unit> = sync.sync()
+    /** Baja la plantilla (no se borra) y retira sus tareas pendientes; el historial se conserva. */
+    suspend fun deleteTemplate(id: String): Result<Unit> = suspendCatching {
+        val (_, hid) = identity()
+        val batch = db.batch()
+        batch.update(db.templates(hid).document(id), mapOf("isActive" to false, "updatedAt" to Timestamp.now()))
+        retirePending(batch, hid, id)
+        send(batch.commit(), "borrar plantilla $id")
+    }
+
+    /** Todo es en vivo: no hay nada que "bajar". Se conserva por compatibilidad con el gesto de recargar. */
+    suspend fun refresh(): Result<Unit> = Result.success(Unit)
+
+    // ── Lecturas puntuales (workers, widget, acciones de notificación) ────────
 
     /**
-     * Tareas pendientes que vencen hoy y cuyo template tiene recordatorios. El worker
-     * de notificaciones lo usa; los horarios son hora local del teléfono.
+     * Pendientes que vencen hoy (o ya vencieron) y cuya plantilla tiene recordatorios. Lee de la caché
+     * local: sirve sin red y sin que haya un listener activo. Las horas son hora local del teléfono.
      */
     suspend fun reminderCandidates(): List<ReminderCandidate> = suspendCatching {
-        val templates = dao.activeTemplatesOnce().associateBy { it.id }
+        val hid = cache.householdId ?: return@suspendCatching emptyList()
+        val templates = queryOnce(db.templates(hid).whereEqualTo("isActive", true))
+            .documents.associateBy { it.id }
         val today = LocalDate.now()
-        dao.allPendingOnce().mapNotNull { task ->
-            val times = task.templateId
-                ?.let { templates[it]?.reminderTimes }
-                ?.split(",")
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
+        queryOnce(db.tasks(hid).whereEqualTo("status", "pending")).documents.mapNotNull { task ->
+            val times = task.getString("templateId")
+                ?.let { templates[it]?.getString("reminderTimes") }
+                ?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }
                 ?: return@mapNotNull null
             if (times.isEmpty()) return@mapNotNull null
-
-            val due = task.dueAt?.let { parseLocalDate(it) } ?: return@mapNotNull null
-            // Avisa lo que vence hoy o ya está atrasado: una tarea de ayer es justo la
-            // que más conviene recordar.
+            val due = isoToLocalDate(task.getTimestamp("dueAt")?.toIso()) ?: return@mapNotNull null
+            // Avisa lo que vence hoy o ya está atrasado: una tarea de ayer es justo la que más conviene recordar.
             if (due.isAfter(today)) return@mapNotNull null
-
-            ReminderCandidate(
-                taskId = task.id,
-                name = task.templateName ?: "Tarea pendiente",
-                times = times
-            )
+            ReminderCandidate(task.id, task.getString("templateName") ?: "Tarea pendiente", times)
         }
     }.getOrDefault(emptyList())
 
     /**
-     * Para el widget "Mis tareas de hoy": pendientes que vencen hoy o ya están atrasadas
-     * (por fecha LOCAL), de esa persona o sin asignar, las más viejas primero.
+     * Para el widget "Mis tareas de hoy": pendientes de hoy o atrasadas (por fecha LOCAL), de esta persona
+     * o sin asignar, las más viejas primero.
      */
-    suspend fun todayTasks(personId: Long?): List<WidgetTask> = suspendCatching {
+    suspend fun todayTasks(): List<WidgetTask> = suspendCatching {
+        val hid = cache.householdId ?: return@suspendCatching emptyList()
+        val uid = cache.uid
         val today = LocalDate.now()
-        dao.allPendingOnce()
-            .filter { it.assignedToId == null || it.assignedToId == personId }
-            .filter { task -> parseLocalDate(task.dueAt ?: return@filter false)?.let { !it.isAfter(today) } ?: false }
-            .sortedBy { it.dueAt }
-            .map { WidgetTask(it.id, it.templateName ?: "Tarea pendiente") }
+        queryOnce(db.tasks(hid).whereEqualTo("status", "pending")).documents
+            .filter { val a = it.getString("assignedToId"); a == null || a == uid }
+            .filter { isoToLocalDate(it.getTimestamp("dueAt")?.toIso())?.let { d -> !d.isAfter(today) } ?: false }
+            .sortedBy { it.getTimestamp("dueAt") }
+            .map { WidgetTask(it.id, it.getString("templateName") ?: "Tarea pendiente") }
     }.getOrDefault(emptyList())
 
-    private fun nowIso(): String = Instant.now().toString()
+    // ── Internos ──────────────────────────────────────────────────────────────
+
+    private fun identity(): Pair<String, String> {
+        val uid = cache.uid ?: error("Sin sesión")
+        val hid = cache.householdId ?: error("Sin hogar")
+        return uid to hid
+    }
+
+    /** Lee un documento de la caché (que está al día mientras haya un listener) y, si no está, del servidor. */
+    private suspend fun fetch(ref: DocumentReference): DocumentSnapshot? {
+        val cached = try {
+            ref.get(Source.CACHE).await().takeIf { it.exists() }
+        } catch (_: FirebaseFirestoreException) {
+            null // no está en la caché
+        }
+        if (cached != null) return cached
+        return withTimeoutOrNull(FETCH_TIMEOUT_MS) { runCatching { ref.get().await() }.getOrNull() }?.takeIf { it.exists() }
+    }
+
+    private suspend fun queryOnce(query: Query): QuerySnapshot =
+        withTimeoutOrNull(FETCH_TIMEOUT_MS) { runCatching { query.get().await() }.getOrNull() }
+            ?: query.get(Source.CACHE).await()
+
+    private suspend fun retirePending(batch: com.google.firebase.firestore.WriteBatch, hid: String, templateId: String) {
+        val pending = queryOnce(db.tasks(hid).whereEqualTo("templateId", templateId).whereEqualTo("status", "pending"))
+        pending.documents.forEach { batch.delete(it.reference) }
+    }
+
+    private suspend fun renamePending(batch: com.google.firebase.firestore.WriteBatch, hid: String, templateId: String, name: String) {
+        val pending = queryOnce(db.tasks(hid).whereEqualTo("templateId", templateId).whereEqualTo("status", "pending"))
+        pending.documents.forEach { batch.update(it.reference, mapOf("templateName" to name, "updatedAt" to Timestamp.now())) }
+    }
+
+    private fun taskData(
+        templateId: String,
+        templateName: String?,
+        dueAt: Timestamp,
+        assignedToId: String?,
+        uid: String,
+        now: Timestamp
+    ): Map<String, Any?> = mapOf(
+        "templateId" to templateId,
+        "templateName" to templateName,
+        "status" to "pending",
+        "dueAt" to dueAt,
+        "assignedToId" to assignedToId,
+        "createdBy" to uid,
+        "createdAt" to now,
+        "updatedAt" to now
+    )
+
+    /** No se espera la confirmación del servidor (sin red tardaría para siempre); solo se registra si falla. */
+    private fun send(task: com.google.android.gms.tasks.Task<Void>, what: String) {
+        task.addOnFailureListener { Log.w(TAG, "Firestore rechazó '$what'", it) }
+    }
+
+    private companion object {
+        const val TAG = "TaskRepository"
+        const val HISTORY_DAYS = 365
+        const val DEFAULT_DUE_DAYS = 7
+        const val FETCH_TIMEOUT_MS = 4_000L
+    }
 }
 
-data class WidgetTask(val id: Long, val name: String)
-
 data class ReminderCandidate(
-    val taskId: Long,
+    val taskId: String,
     val name: String,
     val times: List<String>
 )
 
-private fun parseLocalDate(iso: String): LocalDate? = try {
-    Instant.parse(iso).atZone(ZoneId.systemDefault()).toLocalDate()
-} catch (_: Exception) {
-    null
-}
-
-private fun TaskEntity.toDto(people: List<PersonEntity>): TaskDTO {
-    val assignee = people.firstOrNull { it.id == assignedToId }
-    val completer = people.firstOrNull { it.id == completedById }
-    return TaskDTO(
-        id = id,
-        templateId = templateId,
-        householdId = householdId,
-        status = status,
-        dueAt = dueAt,
-        assignedToId = assignedToId,
-        completedById = completedById,
-        completedAt = completedAt,
-        notes = notes,
-        templateName = templateName,
-        assignedToName = assignee?.name,
-        assignedToColor = assignee?.color,
-        assignedToEmoji = assignee?.avatarEmoji,
-        completedByName = completer?.name,
-        completedByColor = completer?.color,
-        completedByEmoji = completer?.avatarEmoji,
-        rowVersion = rowVersion,
-        clientId = clientId
-    )
-}
-
-private fun TemplateEntity.toDto() = TemplateDTO(
-    id = id,
-    householdId = householdId,
-    name = name,
-    description = description,
-    recurrenceDays = recurrenceDays,
-    preferredAssigneeId = preferredAssigneeId,
-    reminderTimes = reminderTimes,
-    isActive = isActive,
-    rowVersion = rowVersion,
-    clientId = clientId
-)
+data class WidgetTask(val id: String, val name: String)

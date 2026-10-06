@@ -2,7 +2,7 @@ package com.toka.app.ui.history
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.toka.app.data.api.TaskDTO
+import com.toka.app.data.model.TaskDTO
 import com.toka.app.data.isoToLocalDate
 import com.toka.app.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow

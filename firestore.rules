@@ -42,7 +42,8 @@ service cloud.firestore {
       allow read: if esMiembro(hid);
 
       allow create: if logueado()
-        && request.resource.data.keys().hasOnly(['inviteCode', 'members', 'createdBy', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'inviteCode', 'members', 'createdBy', 'createdAt'])
+        && texto(request.resource.data.name, 60) && request.resource.data.name.size() > 0
         && request.resource.data.members == [request.auth.uid]
         && request.resource.data.createdBy == request.auth.uid
         && codigoValido(request.resource.data.inviteCode);
@@ -63,6 +64,10 @@ service cloud.firestore {
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inviteCode'])
           && request.auth.uid in resource.data.members
           && codigoValido(request.resource.data.inviteCode))
+        ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && request.auth.uid in resource.data.members
+          && texto(request.resource.data.name, 60) && request.resource.data.name.size() > 0)
       );
 
       allow delete: if false;
