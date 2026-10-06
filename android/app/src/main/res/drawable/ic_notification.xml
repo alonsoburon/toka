@@ -3,15 +3,12 @@
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="56"
-    android:viewportHeight="56">
-    <group android:translateX="-26" android:translateY="-26">
+    android:viewportWidth="70"
+    android:viewportHeight="70">
+    <group android:translateX="-19" android:translateY="-15">
     <path
         android:fillColor="#FFFFFF"
         android:fillType="evenOdd"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.0"
-        android:strokeLineJoin="round"
-        android:pathData="M54.00,28.00L81.00,52.00L72.50,52.00L72.50,78.00L35.50,78.00L35.50,52.00L27.00,52.00ZM37.43,62.57L50.00,75.13L70.07,55.07L61.93,46.93L50.00,58.87L45.57,54.43Z"/>
+        android:pathData="M54,19Q56.6,19 58.7,21L82,43Q85,46 85,50V68Q85,82 71,82H37Q23,82 23,68V50Q23,46 26,43L49.3,21Q51.4,19 54,19ZM37.60,65.90L49.50,77.80L71.40,55.90L65.60,50.10L49.50,66.20L43.40,60.10Z"/>
     </group>
 </vector>
