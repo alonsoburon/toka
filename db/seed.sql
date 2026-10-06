@@ -1,27 +1,28 @@
 -- seed.sql
--- Idempotente: se puede correr varias veces. ON CONFLICT DO NOTHING salta lo que
--- ya existe. Define el hogar real "Buvea" y su admin (Alonso). Cata no se siembra:
--- entra cuando quiera con el código de invitación, así su identidad la elige ella.
+-- SOLO PARA DESARROLLO. Idempotente: ON CONFLICT DO NOTHING salta lo que ya existe.
+-- Define un hogar de demostración con credenciales públicas a propósito
+-- (token "toka-dev-token", invite code "DEVDEMO234"). Nunca cargues este seed en un
+-- servidor accesible desde internet: cualquiera que lea el repo entraría. Los hogares
+-- reales se crean desde la app (POST /households) y sus credenciales no viven en git.
 --
--- El token de Alonso es fijo y conocido ("buvea-alonso-token-2026"); la base guarda
--- su sha256, precomputado porque SQLite no trae sha256(). Con ese token se entra desde
--- la app con la opción "Token", y sigue sirviendo aunque se recree la base.
+-- La base guarda el sha256 del token, precomputado porque SQLite no trae sha256():
+--   printf 'toka-dev-token' | sha256sum
 
 BEGIN;
 
 INSERT INTO households (id, name, invite_code, created_by, updated_by)
-VALUES (1, 'Buvea', 'BUVEACASA2', 0, 0)
+VALUES (1, 'Demo', 'DEVDEMO234', 0, 0)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO people (id, household_id, name, color, avatar_emoji, token_hash, row_version, created_by, updated_by)
-VALUES (1, 1, 'Alonso', '#a78bfa', '👽',
-        '4389274e271a9cfde42bfd398be2b767d96547699287548f1420ebcdbb694d02', 1, 0, 0)
+VALUES (1, 1, 'Dev', '#a78bfa', '👽',
+        '6508467d2ff3e89531eedcf99be6e35f5d2dce09e88bf7ea5259f5c92203100b', 1, 0, 0)
 ON CONFLICT DO NOTHING;
 
 UPDATE households SET created_by = 1, updated_by = 1 WHERE id = 1 AND created_by = 0;
 UPDATE people SET created_by = 1, updated_by = 1 WHERE id = 1 AND created_by = 0;
 
--- Un par de plantillas domésticas para arrancar, asignadas a Alonso.
+-- Un par de plantillas domésticas para arrancar, asignadas a la persona de demo.
 INSERT INTO task_templates (id, household_id, name, description, recurrence_days, preferred_assignee_id, is_active, row_version, created_by, updated_by) VALUES
 (1, 1, 'Sacar la basura',  'Sacar la basura cada semana', 7, 1, true, 2, 1, 1),
 (2, 1, 'Lavar los platos', 'Lavar los platos diario',      1, 1, true, 3, 1, 1),

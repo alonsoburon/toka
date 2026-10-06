@@ -19,19 +19,19 @@ make curl-setup # cheat-sheet de todos los endpoints
   desde la raíz del repo. Flags: `-seed`, `-port`, `-migrate-only`, `-env <archivo>`.
 - `TOKA_DB` elige el archivo SQLite (default `toka.db`).
 - Android: `cd android && ./gradlew assembleDebug` (o `compileDebugKotlin` para verificar
-  rápido). `BASE_URL` está hardcodeada como IP de LAN en `android/app/build.gradle.kts`.
+  rápido). `BASE_URL` por defecto (`android/app/build.gradle.kts`) es `https://toka.nuxapower.cl/`; el build debug permite http para el emulador (`http://10.0.2.2:3000`).
 
 ## Verificación
 
-No hay tests unitarios en Go. Al terminar un cambio:
+Los tests de Go (`go test ./...`) viven en `internal/server/server_test.go`. Al terminar un cambio:
 
 1. `gofmt -w .` y luego `gofmt -l .` vacío (no hay target de `make` para esto).
-2. `go build ./...` y `go vet ./...`.
+2. `go build ./...`, `go vet ./...` y `go test ./...`.
 3. Con el server arriba: `.claude/scripts/smoke.sh` y `.claude/scripts/smoke-sync.sh`.
 4. Android: `cd android && ./gradlew compileDebugKotlin`.
 
-`.claude/commands/check.md` describe el orden completo. El repo tiene un solo commit y
-sin flujo de PR documentado; no inventes convenciones de ramas.
+`.claude/commands/check.md` describe el orden completo. Los releases salen de tags `vX.Y.Z` (ver README); no hay flujo de PR documentado, no
+inventes convenciones de ramas.
 
 ## Reglas que un agente suele romper
 

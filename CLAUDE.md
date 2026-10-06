@@ -11,13 +11,14 @@ de tarea recurrentes (`task_templates`) que generan instancias (`task_instances`
 |------|-----------|
 | Backend | Go 1.26, stdlib `net/http` (routing 1.22+), `database/sql` + `modernc.org/sqlite` (puro Go, sin CGO) |
 | DB | SQLite: un solo archivo (`TOKA_DB`, por defecto `toka.db`). Sin daemon ni roles |
-| Android | Kotlin + Compose (BOM 2024.12), Retrofit, Room (SQLite local), WorkManager, minSdk 33 |
+| Android | Kotlin 2.3 + Compose (BOM 2026.03), AGP 8.13, Retrofit, Room (SQLite local), WorkManager, minSdk 33 / targetSdk 36 |
 
 ## Comandos
 
 ```bash
 make run         # copia .env si falta y sirve en :3000 (migra al arrancar)
-make run-seed    # migra + carga db/seed.sql (idempotente)
+make run-seed    # migra + carga db/seed.sql (idempotente). SOLO DEV: hogar "Demo" con token público
+make smoke       # smoke tests contra una base temporal (no toca toka.db)
 make build       # compila ./toka
 make db-reset    # borra toka.db y lo recrea con seed  ⚠️ destruye datos
 make curl-setup  # imprime el cheat-sheet de curl de todos los endpoints
@@ -25,6 +26,12 @@ make curl-setup  # imprime el cheat-sheet de curl de todos los endpoints
 
 El servidor **lee `db/migrations/` y `db/seed.sql` desde el disco en runtime**
 (`os.ReadDir`/`os.ReadFile`), así que hay que ejecutarlo desde la raíz del repo.
+
+Tests: `go test ./...` (HTTP real con `httptest` sobre una SQLite temporal, en `internal/server`).
+
+Despliegue y respaldo: `Containerfile`, `deploy/` (timer + scripts de respaldo y restauración) y la
+sección "Servidor en producción" del README. **Nunca cargues `db/seed.sql` en producción**: el repo es
+público y el token/invite del seed son conocidos.
 
 Android: `cd android && ./gradlew assembleDebug`. La URL del backend se configura en
 la pantalla "Conectar al servidor"; `BASE_URL` en `android/app/build.gradle.kts` es
@@ -84,6 +91,11 @@ serializa las escrituras de todos modos. **Toda escritura en `people`,
 y, si es un UPDATE, actualizar `updated_at` a mano** (SQLite no tiene el trigger
 `set_updated_at()` de Postgres).
 
+**Plantillas creadas offline:** el cliente las muestra con un id negativo; mientras la creación sigue en la cola,
+`template.update` / `template.set_recurrence` / `template.delete` llevan además `client_id` y el servidor resuelve
+el id real (`resolveTemplateID`). La dedupe de `mutation_id` filtra por household, y `sync_mutations` se poda a
+los 90 días (`db.PruneMutations`, al arrancar y cada 24 h).
+
 **Deduplicación, dos capas independientes:**
 
 1. `mutation_id` (UUID del cliente) es la clave primaria de `sync_mutations`. Reenviar
@@ -102,6 +114,17 @@ que estar tres días sin señal no corre la ventana de la siguiente tarea recurr
 - `SyncEngine` sube la cola y después baja los cambios, en ese orden.
 - `SyncWorker` (WorkManager) corre al abrir la app, tras cada escritura y cada 15 min.
 - Conflictos: gana el servidor. Un 409 descarta la mutación y el pull trae la verdad.
+- `SyncEngine.kick()` sincroniza en proceso al instante (y deja un `SyncWorker` de respaldo): el job de
+  WorkManager por sí solo puede tardar minutos. Si queda algo sin subir (5xx/red) el ciclo se corta **antes
+  del pull** (`PushIncompleteException`) para no pisar lo optimista; una mutación con 25 fallos se descarta.
+- Un **401** cierra la sesión (`SessionExpiredException`, conserva `server_url`) y `MainActivity` vuelve a la
+  pantalla de entrada: el token ya no existe en el servidor.
+- Room: sin `fallbackToDestructiveMigration` (destruiría el `outbox`). Cada cambio de esquema necesita su
+  `Migration`; los esquemas se exportan a `android/app/schemas/`.
+- Widget "Mis tareas de hoy" (`widget/TodayWidgetProvider`, RemoteViews, sin Glance): pendientes de hoy o
+  atrasadas, mías o sin asignar. Se redibuja en cada `kick`, tras cada sync y en el `ReminderWorker`.
+- Fechas: el servidor manda UTC; para "hoy/mañana" se convierte a fecha **local** (`isoToLocalDate`), y un
+  vencimiento "ese día" es el final del día local (`endOfLocalDay`).
 - Las creaciones offline viven con un id negativo provisional hasta que el servidor
   confirma el `client_id` y devuelve el id real.
 - **Deshacer:** `undoTask` vuelve la tarea a `pending` localmente y encola
@@ -162,6 +185,11 @@ updated_by   INTEGER NOT NULL DEFAULT 0 REFERENCES people(id) DEFERRABLE INITIAL
 - **Toda query filtra por `household_id`.** Es la única frontera de aislamiento entre
   households; olvidarla es una fuga de datos entre familias.
 - Path params con `r.PathValue("id")`; parseo con `strconv.ParseInt`.
+- **Referencias a personas:** todo `assigned_to_id` / `preferred_assignee_id` que llegue del cliente se valida con
+  `personInHousehold` (la FK solo exige que exista, y una persona ajena filtraría su nombre por los JOIN). Los
+  JOIN a `people` también filtran por `household_id`.
+- **Validación de entrada:** longitudes (`maxNameLen`, `maxTextLen`…) y `recurrence_days` en 1..3650 (0 en
+  `/recurrence` = una sola vez) se validan en `helpers.go`, igual online y en `applyOp`.
 - Respuestas: `w.Header().Set("Content-Type", "application/json")` +
   `json.NewEncoder(w).Encode(v)`. Errores: `http.Error(w, `{"error":"..."}`, status)`.
 - Structs de request anidados en el archivo del handler, no en `model`.
@@ -181,6 +209,10 @@ En `handler.createNextInstance` (`internal/handler/instances.go`), al completar 
   `due_at` original**. Es deliberadamente no punitivo: atrasarse no acorta la ventana siguiente.
 - La nueva instancia se asigna a `template.preferred_assignee_id` (puede ser NULL).
 - Se crea dentro de la misma transacción que el `complete`/`skip`.
+- Si la plantilla está dada de baja (`is_active = false`) no se genera nada. Borrar una plantilla
+  (`DELETE /templates/{id}`, `template.delete` o `is_active=false`) retira sus instancias **pendientes** con
+  tombstone (`retirePendingInstances`); las resueltas quedan como historial.
+- Un error de base de datos en `createNextInstance` se propaga (rollback), no se traga.
 
 ## Rutas registradas
 
@@ -188,8 +220,8 @@ Fuente de verdad: `internal/server/server.go`.
 
 | Método | Path | Auth | Handler |
 |--------|------|------|---------|
-| GET | `/healthz` | — | `Health` — sondeo de disponibilidad `{"status":"ok"}` |
-| POST | `/households` | — | `CreateHousehold` — crea household + persona admin, devuelve token |
+| GET | `/healthz` | — | `Health` — `{"status":"ok"}`, o 503 si la base no responde |
+| POST | `/households` | — | `CreateHousehold` — crea household + persona admin, devuelve token (tope `TOKA_MAX_HOUSEHOLDS`, default 100 → 403) |
 | POST | `/households/join` | — | `JoinHousehold` — por `invite_code` |
 | GET | `/me` | Bearer | `GetMe` — persona + hogar del token (login por token) |
 | GET | `/households/{hid}/people` | Bearer | `ListPeople` |
@@ -215,8 +247,8 @@ Sin Bearer válido: `401 {"error":"unauthorized"}`.
 
 ## Al terminar un cambio
 
-1. `gofmt -w .` y `go build ./...` + `go vet ./...` (no hay tests unitarios).
-2. Con el server arriba: `.claude/scripts/smoke.sh` y `.claude/scripts/smoke-sync.sh`.
+1. `gofmt -w .`, `go build ./...`, `go vet ./...` y `go test ./...`.
+2. `make smoke` (base temporal) o, con el server arriba, `.claude/scripts/smoke.sh` y `smoke-sync.sh`.
 3. Si tocaste rutas o el contrato JSON, actualiza **las dos** puntas:
    `server.go` ↔ `TokaApi.kt` + `ApiModels.kt`. Si además es una escritura, añade su
    operación al dispatch de `applyOp` en `internal/handler/sync.go`, o la app no podrá

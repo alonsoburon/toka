@@ -6,17 +6,25 @@ description: Probar el flujo completo de la API de Toka con curl contra el serve
 # Smoke test de la API
 
 El proyecto no tiene tests automatizados. Esto es el sustituto: ejercita el flujo real
-contra Postgres y verifica los invariantes que importan.
+contra SQLite y verifica los invariantes que importan.
 
 ## Ejecutar
 
+Lo normal es `make smoke`: compila, levanta un server propio en el puerto 3099 con una
+base temporal (no toca `toka.db`), corre `smoke.sh` y `smoke-sync.sh`, y limpia al salir.
+
 ```bash
-make db-up
-make run &          # o en otra terminal; espera a ver "Toka running on ..."
-.claude/scripts/smoke.sh
+make smoke
 ```
 
-El script crea su propio household desechable en cada corrida (no depende del seed, así
+Contra un server ya levantado a mano (`make run` en otra terminal; usa `toka.db`):
+
+```bash
+.claude/scripts/smoke.sh
+.claude/scripts/smoke-sync.sh
+```
+
+Cada script crea su propio household desechable en cada corrida (no depende del seed, así
 que es seguro correrlo N veces) e imprime `PASS`/`FAIL` por aserción. Sale con código 1
 si algo falla.
 

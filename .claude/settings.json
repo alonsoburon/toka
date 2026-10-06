@@ -13,21 +13,14 @@
       "Bash(make build)",
       "Bash(make run)",
       "Bash(make run-seed)",
-      "Bash(make db-up)",
-      "Bash(make db-down)",
       "Bash(make curl-setup)",
       "Bash(curl -s http://localhost:3000/*)",
       "Bash(curl -s -X POST http://localhost:3000/*)",
-      "Bash(sudo -u postgres pg_isready*)",
-      "Bash(sudo -u postgres psql -d toka -c SELECT *)",
-      "Bash(sudo -u postgres psql -d toka -c \\d*)",
       "Bash(./gradlew assembleDebug*)",
       "Bash(./gradlew compileDebugKotlin*)"
     ],
     "ask": [
       "Bash(make db-reset)",
-      "Bash(sudo -u postgres dropdb*)",
-      "Bash(sudo -u postgres createdb*)",
       "Edit(db/migrations/*)"
     ],
     "deny": [

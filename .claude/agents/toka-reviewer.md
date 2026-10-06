@@ -14,12 +14,13 @@ Lee `CLAUDE.md` primero para el contexto del esquema y las rutas.
 
 1. **Aislamiento por household.** Toda query sobre `people`, `task_templates` o
    `task_instances` debe filtrar por `household_id` (o unirse a una tabla que ya lo filtre).
-   Un `UPDATE`/`DELETE`/`SELECT` por `id` sin `AND household_id = $n` deja que el token de
+   Un `UPDATE`/`DELETE`/`SELECT` por `id` sin `AND household_id = ?` deja que el token de
    una familia toque los datos de otra. Es la falla más grave posible aquí.
    Verifica con: `rg -n 'FROM (people|task_templates|task_instances)' -A4 internal/handler`.
 
 2. **Transacciones en escrituras.** Todo `INSERT`/`UPDATE`/`DELETE` va dentro de
-   `Begin` + `defer Rollback` + `Commit` explícito. Señales de problema: un `Commit` que
+   `s.DB.BeginTx(ctx, nil)` + `defer tx.Rollback()` + `tx.Commit()` explícito, y usa
+   `tx.ExecContext`/`tx.QueryRowContext` (no `s.DB` directo). Señales de problema: un `Commit` que
    falta, un `Commit` cuyo error se ignora, o dos escrituras relacionadas (completar tarea
    + generar la siguiente) en transacciones distintas.
 
@@ -44,11 +45,19 @@ Lee `CLAUDE.md` primero para el contexto del esquema y las rutas.
 8. **Nullability.** Columna nullable → puntero en el struct de `model`. Un `Scan` a un
    tipo valor sobre una columna NULL da error en runtime.
 
-9. **Convenciones de migración.** Tabla nueva → las cuatro columnas de metadata, el trigger
-   `trg_<tabla>_updated_at`, las FKs a `people` como `DEFERRABLE INITIALLY DEFERRED`, y el
-   `.down.sql` correspondiente. Ninguna migración ya aplicada fue editada.
+9. **Sincronización.** Toda escritura en `people`, `task_templates` o `task_instances`
+   asigna `row_version` con `db.NextRowVersion(ctx, tx)` **dentro de la misma
+   transacción**, y todo `UPDATE` pone `updated_at` a mano
+   (`strftime('%Y-%m-%d %H:%M:%f+00:00','now')`): SQLite no tiene trigger. Una escritura
+   nueva también debe estar en el dispatch de `applyOp` en `internal/handler/sync.go`.
 
-10. **Recurrencia.** En `createNextInstance`: `recurrence_days IS NULL` no genera nada; el
+10. **Convenciones de migración (SQLite).** Tabla nueva → las cuatro columnas de metadata
+    (`created_at`, `updated_at`, `created_by`, `updated_by`), `INTEGER PRIMARY KEY
+    AUTOINCREMENT`, fechas `TIMESTAMP` con el default `strftime`, FKs a `people(id)`
+    inline y `DEFERRABLE INITIALLY DEFERRED`, y el `.down.sql` correspondiente. Ninguna
+    migración ya aplicada fue editada. El seed sigue idempotente (`ON CONFLICT DO NOTHING`).
+
+11. **Recurrencia.** En `createNextInstance`: `recurrence_days IS NULL` no genera nada; el
     `due_at` nuevo se calcula desde el momento del completado, nunca desde el `due_at` viejo.
 
 ## Formato de salida

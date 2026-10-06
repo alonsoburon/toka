@@ -18,14 +18,14 @@ type CreateCosaRequest struct {
 }
 
 func (s *Server) CreateCosa(w http.ResponseWriter, r *http.Request) {
-	person, hid, ok := auth.RequireAuth(w, r)
+	creator, hid, ok := auth.RequireAuth(w, r)
 	if !ok {
 		return
 	}
 
 	var req CreateCosaRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 		return
 	}
 	if req.Name == "" {
@@ -33,28 +33,37 @@ func (s *Server) CreateCosa(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := s.DB.Begin(r.Context())
+	tx, err := s.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
+
+	// Tabla sincronizada (people, task_templates, task_instances): row_version
+	// dentro de la misma transacción que la escritura.
+	version, err := db.NextRowVersion(r.Context(), tx)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
 
 	var cosa model.Cosa
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO cosas (household_id, name, created_by, updated_by)
-		VALUES ($1, $2, $3, $3)
-		RETURNING id, household_id, name, created_at, updated_at, created_by, updated_by
-	`, hid, req.Name, person.ID).Scan(
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO cosas (household_id, name, row_version, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?)
+		RETURNING id, household_id, name, created_at, updated_at,
+			created_by, updated_by, row_version
+	`, hid, req.Name, version, creator.ID, creator.ID).Scan(
 		&cosa.ID, &cosa.HouseholdID, &cosa.Name,
 		&cosa.CreatedAt, &cosa.UpdatedAt, &cosa.CreatedBy, &cosa.UpdatedBy,
-	)
+		&cosa.RowVersion)
 	if err != nil {
-		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"could not create cosa"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -64,18 +73,28 @@ func (s *Server) CreateCosa(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+Mira `CreateTemplate` en `internal/handler/templates.go` como referencia viva del estilo.
+Un `UPDATE` además pide `row_version = ?` (otro `NextRowVersion`) y
+`updated_at = strftime('%Y-%m-%d %H:%M:%f+00:00','now')` a mano — no hay trigger.
+
 Reglas no negociables:
 
-- **Todo `WHERE` lleva `household_id = $n`.** Es la única frontera entre familias.
-  En un `UPDATE`/`DELETE` por id: `WHERE id = $1 AND household_id = $2`. Sin eso, un
+- **Todo `WHERE` lleva `household_id = ?`.** Es la única frontera entre familias.
+  En un `UPDATE`/`DELETE` por id: `WHERE id = ? AND household_id = ?`. Sin eso, un
   token de una casa puede tocar los datos de otra.
-- Escrituras en transacción: `Begin` + `defer Rollback` + `Commit` explícito.
+- Escrituras en transacción: `s.DB.BeginTx(r.Context(), nil)` + `defer tx.Rollback()` +
+  `tx.Commit()` explícito.
   El `Rollback` después de un `Commit` correcto es un no-op, por eso el patrón es seguro.
 - `created_by`/`updated_by` = `person.ID`, nunca del body.
-- Lecturas simples pueden ir directo con `s.DB.Query` / `s.DB.QueryRow`, sin transacción.
+- Lecturas: `tx.QueryContext` / `tx.QueryRowContext` (como `ListTemplates`); una fila
+  ausente es `errors.Is(err, sql.ErrNoRows)`.
+- Escrituras sobre tablas sincronizadas: `row_version = NextRowVersion(...)` y, en UPDATE,
+  `updated_at` a mano. Además añade la operación al dispatch de `applyOp` en
+  `internal/handler/sync.go` para que funcione sin conexión.
+- SQL parametrizado con `?`; nunca concatenar valores.
 - Path params: `id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)` → 400 si falla.
 - Query params: `r.URL.Query().Get("days")` con un default explícito.
-- En `PATCH`, campos punteros + `COALESCE($n, columna)` para no borrar lo ausente.
+- En `PATCH`, campos punteros + `COALESCE(?, columna)` para no borrar lo ausente.
 - Errores: `http.Error(w, `{"error":"..."}`, status)` — JSON, no texto pelado.
 - Nada de `panic`, nada de logs por request.
 - Si el recurso es soft-deletable, `DELETE` = `UPDATE ... SET is_active = false`.
@@ -126,14 +145,14 @@ suspend fun createCosa(
 
 ```bash
 go build ./...
-make run          # en otra terminal
+make run-seed     # en otra terminal; migra y carga el seed
 ```
 
-Prueba real con curl — hay tokens de seed listos (`seed-token-alonso-abc123`):
+Prueba real con curl — hay tokens de seed listos (`toka-dev-token`):
 
 ```bash
 curl -s -X POST http://localhost:3000/cosas \
-  -H "Authorization: Bearer seed-token-alonso-abc123" \
+  -H "Authorization: Bearer toka-dev-token" \
   -H "Content-Type: application/json" \
   -d '{"name":"prueba"}' | python3 -m json.tool
 ```

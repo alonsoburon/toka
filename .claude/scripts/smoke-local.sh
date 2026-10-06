@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Corre las smoke tests contra un server con base temporal, para no ensuciar toka.db
-# (el hogar real "Buvea"). Uso: make smoke
+# (que puede contener datos reales). Uso: make smoke
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 

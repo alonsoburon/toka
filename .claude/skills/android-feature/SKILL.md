@@ -68,4 +68,4 @@ cd android && ./gradlew assembleDebug        # APK completo
 ```
 
 No hay tests instrumentados. Para probar de verdad hace falta el backend arriba
-(`make db-up && make run-seed`) y el dispositivo en la misma red que la IP de `BASE_URL`.
+(`make run-seed`) y el dispositivo en la misma red que la IP de `BASE_URL`.

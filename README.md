@@ -28,10 +28,12 @@ make run-seed   # migra, siembra y sirve en :3000 (crea .env si falta)
 La base se migra sola al arrancar, leyendo `db/migrations/` del disco, así que el
 servidor se ejecuta desde la raíz del repo.
 
-Datos de prueba listos para usar tras el seed:
+El seed (`db/seed.sql`) es **solo para desarrollo**: crea un hogar "Demo" con credenciales
+públicas (token `toka-dev-token`, invite `DEVDEMO234`). Nunca lo cargues en un servidor
+expuesto.
 
 ```bash
-curl -s localhost:3000/tasks -H "Authorization: Bearer seed-token-alonso-abc123" | jq
+curl -s localhost:3000/tasks -H "Authorization: Bearer toka-dev-token" | jq
 ```
 
 `make curl-setup` imprime el resto de los endpoints.
@@ -42,28 +44,39 @@ Android:
 cd android && ./gradlew assembleDebug
 ```
 
-La URL del backend está en `buildConfigField("String", "BASE_URL", ...)` dentro de
-`android/app/build.gradle.kts`.
+La URL del backend por defecto (`BASE_URL` en `android/app/build.gradle.kts`) es
+`https://toka.nuxapower.cl/`; se puede cambiar en la pantalla "Conectar al servidor". Desde
+el emulador, el backend local del host se ve como `http://10.0.2.2:3000`.
 
 ## Servidor en producción
 
-El backend corre en una VM **e2-micro Always Free** de GCP:
+Corre en el VPS OVH (Debian, Podman rootless + Quadlet, Caddy delante, Cloudflare):
 
-- Instancia `toka` · proyecto `toka-personal` · zona `us-west1-b`
-- URL pública: `https://8-235-73-211.sslip.io` (Caddy + Let's Encrypt)
-- systemd `toka` · binario `/opt/toka/toka` · SQLite `/opt/toka/toka.db`
+- URL pública: `https://toka.nuxapower.cl` (Caddy → `127.0.0.1:3001`; el contenedor no
+  publica nada más). Sondeo: `GET /healthz`.
+- Quadlet en `~/.config/containers/systemd/`, fuentes en `~/apps/toka/`, imagen
+  `localhost/toka:latest` (ver `Containerfile`). La infraestructura común está descrita
+  en `~/code/AGENTS.md`.
+- La base es un solo archivo SQLite (`TOKA_DB`) en un volumen del contenedor.
 
-Deploy de una versión nueva:
+Deploy de una versión nueva (en el VPS):
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o /tmp/toka-linux .
-gcloud compute scp /tmp/toka-linux toka:/tmp/ \
-  --zone us-west1-b --project toka-personal --tunnel-through-iap
-gcloud compute ssh toka --zone us-west1-b --project toka-personal --tunnel-through-iap \
-  --command "sudo install -o toka -g toka -m755 /tmp/toka-linux /opt/toka/toka && sudo systemctl restart toka"
+cd ~/apps/toka && git pull --ff-only
+podman build -t localhost/toka:latest -f Containerfile .
+systemctl --user restart toka
+curl -s https://toka.nuxapower.cl/healthz
 ```
 
-El SSH solo entra por IAP: requiere `gcloud auth login nuxapower@gmail.com`.
+**No cargues el seed en producción.** Los hogares reales se crean desde la app.
+
+### Respaldo
+
+`deploy/backup-toka.sh` hace una copia consistente con `sqlite3 .backup` (sin parar el
+servicio), verifica `PRAGMA integrity_check` y la sube a R2; `deploy/restore-check.sh`
+restaura la última copia a un archivo temporal y compara conteos. Los units de systemd
+están en `deploy/`. Un respaldo sin restauración probada no cuenta: corre
+`restore-check.sh` después de instalar el timer.
 
 ## Releases e instalación con Obtainium
 
@@ -82,12 +95,13 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-El workflow deriva `versionName` del tag y `versionCode = major*10000 + minor*100 + patch`,
+El workflow verifica la firma (`apksigner verify`) y falla si faltan los secrets, en vez de
+publicar un APK sin firmar. Deriva `versionName` del tag y `versionCode = major*10000 + minor*100 + patch`,
 así que un tag más alto siempre instala por encima del anterior. La firma usa el keystore
 guardado en los secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD`.
 
-**Guardá `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
+**Guarda `android/release.jks` y `android/keystore.properties`** (están gitignoreados).
 Son la única forma de firmar actualizaciones que Android acepte como del mismo
 desarrollador; si se pierden, hay que desinstalar y reinstalar. El APK de release y el de
 debug tienen firmas distintas: para pasar de uno a otro hay que desinstalar.
@@ -117,9 +131,9 @@ que trabajan en este repositorio.
 
 ## Estado
 
-Funciona y está verificado de punta a punta con `.claude/scripts/smoke.sh` y
-`.claude/scripts/smoke-sync.sh`, que ejercitan la API real contra SQLite. No hay tests
-unitarios en Go todavía.
+Funciona y está verificado de punta a punta con `go test ./...` (aislamiento entre hogares,
+sync/`applyOp`, recurrencia, validación) y con `make smoke`, que ejercita la API real contra una
+SQLite temporal.
 
 El Dashboard, Historial y Personas ya leen de los `Flow` de Room, así que se redibujan
-solos cuando entra un sync. Quedan por migrar algunas lecturas puntuales.
+solos cuando entra un sync. El detalle de tarea y "crear plantilla" también leen de Room.
